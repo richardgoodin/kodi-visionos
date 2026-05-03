@@ -88,10 +88,12 @@ if [ "$SKIP_DEPENDS" -eq 0 ]; then
   ./bootstrap 2>/dev/null || true
   # Use the darwin host triplet so configure.ac's *darwin* case is matched;
   # platform differentiation (xros SDK) is done via --with-platform=visionos.
+  # --with-sdk is intentionally omitted: configure auto-detects the SDK version
+  # via `xcrun --sdk xros --show-sdk-version`.  Passing the full SDK path here
+  # produces a malformed deps_dir with the entire SDK path embedded in it.
   ac_cv_prog_cc_c23=no ac_cv_prog_cc_c11=no ./configure \
     --host=aarch64-apple-darwin \
-    --with-platform=visionos \
-    --with-sdk="$SDK_PATH"
+    --with-platform=visionos
   make -j"$JOBS"
   info "Depends build complete."
 else

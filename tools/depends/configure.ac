@@ -566,7 +566,13 @@ case $host in
 
     platform_min_version="$target_platform-version-min=$target_minver"
 
-    platform_includes="-arch $use_cpu -m$platform_min_version -isysroot $use_sdk_path"
+    if test "$target_platform" = "xros"; then
+      # Apple clang has no -mxros-version-min flag.  Use the full -target triple
+      # instead; it subsumes -arch and the deployment-target version in one flag.
+      platform_includes="-target $use_cpu-apple-xros$target_minver -isysroot $use_sdk_path"
+    else
+      platform_includes="-arch $use_cpu -m$platform_min_version -isysroot $use_sdk_path"
+    fi
     platform_ldflags="${platform_ldflags} $platform_includes"
     deps_dir="${sdk_name}_${use_cpu}-target-${build_type}"
   ;;

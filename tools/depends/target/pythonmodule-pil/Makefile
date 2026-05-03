@@ -34,10 +34,15 @@ ZLIB_ROOT=$(PREFIX)
 
 ifeq (darwin, $(findstring darwin, $(HOST)))
   ifeq ($(CPU),arm64)
-    # Work around an issue with xcode 11 stripping -arch arm64 flags.
-    # Not required for xcode 12+, but doesnt hurt either.
-    CFLAGS+= -target arm64-apple-darwin
-    LDFLAGS+= -target arm64-apple-darwin
+    ifneq ($(OS),darwin_embedded)
+      # Work around an issue with xcode 11 stripping -arch arm64 flags.
+      # Not required for xcode 12+, but doesnt hurt either.
+      # darwin_embedded targets (iOS/tvOS/visionOS) already carry a full
+      # -target triple in platform_includes; adding -target arm64-apple-darwin
+      # here would override the embedded-OS target and cause a link failure.
+      CFLAGS+= -target arm64-apple-darwin
+      LDFLAGS+= -target arm64-apple-darwin
+    endif
   endif
 
   ifneq ($(OS),android)
