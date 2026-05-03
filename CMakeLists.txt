@@ -425,8 +425,8 @@ elseif(CORE_SYSTEM_NAME STREQUAL android)
 endif()
 
 # main library (used for main binary and tests)
-if(CORE_SYSTEM_NAME STREQUAL "darwin_embedded")
-  # $<TARGET_OBJECTS:> as at 3.26.4 provides incorrect paths for ios/tvos platforms
+if(CORE_SYSTEM_NAME STREQUAL "darwin_embedded" OR CORE_SYSTEM_NAME STREQUAL "visionos")
+  # $<TARGET_OBJECTS:> as at 3.26.4 provides incorrect paths for ios/tvos/visionos platforms
   # Even if XCODE_EMIT_EFFECTIVE_PLATFORM_NAME global property is used, the xcode project
   # still sets int dir paths to $(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME) and the generator
   # expression only provides a path using $(CONFIGURATION)
@@ -565,7 +565,8 @@ if(WIN32)
   endif()
 elseif(CORE_SYSTEM_NAME STREQUAL android)
   # Nothing
-elseif(CORE_SYSTEM_NAME STREQUAL darwin_embedded OR CORE_SYSTEM_NAME STREQUAL osx)
+elseif(CORE_SYSTEM_NAME STREQUAL darwin_embedded OR CORE_SYSTEM_NAME STREQUAL osx OR
+       CORE_SYSTEM_NAME STREQUAL visionos)
   # Build all apple app target as bundled and dont sign.
   # We do all signing post build of the app target manually
   set_target_properties(${APP_NAME_LC} PROPERTIES OUTPUT_NAME ${APP_NAME}

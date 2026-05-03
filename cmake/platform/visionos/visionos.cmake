@@ -1,13 +1,12 @@
-# cmake/platform/darwin/visionos/visionos.cmake
+# cmake/platform/visionos/visionos.cmake
 # Platform-specific settings for the Kodi visionOS port.
-# Loaded after the base darwin_embedded settings if CORE_SYSTEM_NAME=visionos.
+# Loaded by cmake/scripts/common/Platform.cmake when CORE_SYSTEM_NAME=visionos.
 
 list(APPEND ARCH_DEFINES -DTARGET_DARWIN_VISIONOS)
 
 # visionOS does not expose native OpenGL ES; ANGLE provides GLES over Metal.
 # The EGL/GLES headers ship with ANGLE's include directory (not the platform SDK).
 set(ENABLE_AIRTUNES OFF CACHE BOOL "" FORCE)
-set(${CORE_SYSTEM_NAME}_SEARCH_CONFIG NO_DEFAULT_PATH CACHE STRING "")
 set(PLATFORM_OPTIONAL_DEPS_EXCLUDE CEC)
 
 # ANGLE headers must be on the include path before any platform SDK GLES headers.
