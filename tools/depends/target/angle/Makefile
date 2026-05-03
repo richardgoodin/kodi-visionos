@@ -10,7 +10,9 @@ ifeq ($(CROSS_COMPILING), yes)
 else
   ROOT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
   PREFIX ?= $(ROOT_DIR)/angle-install
-  BASE_URL ?= https://mirrors.kodi.tv/build-deps/sources
+  # ANGLE is fetched directly from Googlesource; the ARCHIVE variable is just
+  # the commit hash + .tar.gz, so BASE_URL must include the full path prefix.
+  BASE_URL ?= https://chromium.googlesource.com/angle/angle/+archive
   RETRIEVE_TOOL := curl
   RETRIEVE_TOOL_FLAGS := -LsS --create-dirs --retry 10 --retry-connrefused -o
   ARCHIVE_TOOL := tar
@@ -51,8 +53,9 @@ ANGLE_GN_ARGS := \
   angle_use_commit_id=false \
   is_component_build=false
 
-LIBDYLIB_EGL  = $(PLATFORM)/out/Release/libEGL.a
-LIBDYLIB_GLES = $(PLATFORM)/out/Release/libGLESv2.a
+# GN/ninja places static libraries under out/Release/obj/, not out/Release/
+LIBDYLIB_EGL  = $(PLATFORM)/out/Release/obj/libEGL.a
+LIBDYLIB_GLES = $(PLATFORM)/out/Release/obj/libGLESv2.a
 
 include ../../download-files.include
 all: .installed-$(PLATFORM)
