@@ -86,8 +86,10 @@ if [ "$SKIP_DEPENDS" -eq 0 ]; then
   info "Building Kodi depends for visionOS..."
   cd "$KODI_DIR/tools/depends"
   ./bootstrap 2>/dev/null || true
+  # Use the darwin host triplet so configure.ac's *darwin* case is matched;
+  # platform differentiation (xros SDK) is done via --with-platform=visionos.
   ac_cv_prog_cc_c23=no ac_cv_prog_cc_c11=no ./configure \
-    --host=arm64-apple-xros \
+    --host=aarch64-apple-darwin \
     --with-platform=visionos \
     --with-sdk="$SDK_PATH"
   make -j"$JOBS"

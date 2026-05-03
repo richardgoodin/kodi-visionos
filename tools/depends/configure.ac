@@ -495,6 +495,10 @@ case $host in
         target_platform=iphoneos
         platform_os="darwin_embedded"
       ;;
+      visionos)
+        target_platform=xros
+        platform_os="darwin_embedded"
+      ;;
       macos)
         target_platform=macosx
         platform_os="osx"
@@ -528,7 +532,12 @@ case $host in
 
         case $platform_os in
           darwin_embedded)
-            target_minver="12.0"
+            # visionOS ships as a separate SDK; its versioning starts at 1.0.
+            if test "$use_platform" = "visionos"; then
+              target_minver="1.0"
+            else
+              target_minver="12.0"
+            fi
           ;;
           osx)
             target_minver="11.0"
@@ -566,7 +575,7 @@ case $host in
 esac
 
 case $use_platform in
-  ios|tvos|macos)
+  ios|tvos|macos|visionos)
     ;;
   webos)
     ;;
