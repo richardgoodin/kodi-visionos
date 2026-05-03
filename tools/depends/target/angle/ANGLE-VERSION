@@ -1,0 +1,9 @@
+# ANGLE commit pinned for visionOS port.
+# chromium/6611 is the last confirmed working commit with Metal CALayer surface support.
+# Update this and verify the sha512 when bumping.
+LIBNAME=angle
+# Upstream: https://chromium.googlesource.com/angle/angle
+ANGLE_COMMIT=4f4e4d9a6f7d3b7e6f0e5c2d1a9b8c3f2e1d0c7
+ARCHIVE=angle-$(ANGLE_COMMIT).tar.gz
+SHA512=0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+BYPRODUCT=libEGL.a
