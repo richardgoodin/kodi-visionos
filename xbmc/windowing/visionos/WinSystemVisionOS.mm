@@ -9,11 +9,17 @@
 #include "WinSystemVisionOS.h"
 
 #include "ServiceBroker.h"
-#import "cores/AudioEngine/Sinks/AESinkDARWINTVOS.h"
+// visionOS is an embedded Apple platform; the iOS audio sink (AVAudioSession +
+// AudioUnit) is the closest match.  AESinkDARWINTVOS would also compile since
+// AVAudioSession is present on visionOS, but tvOS-specific route / category
+// constants that aren't available on xrOS will produce warnings.
+#import "cores/AudioEngine/Sinks/AESinkDARWINIOS.h"
 #include "cores/RetroPlayer/process/ios/RPProcessInfoIOS.h"
 #include "cores/RetroPlayer/rendering/VideoRenderers/RPRendererOpenGLES.h"
 #include "cores/VideoPlayer/DVDCodecs/DVDFactoryCodec.h"
 #include "cores/VideoPlayer/DVDCodecs/Video/VTB.h"
+// ProcessInfoIOS / RPProcessInfoIOS are pure C++ stubs; no iOS-specific APIs.
+// They register VTB + GLES capabilities that are identical on visionOS.
 #include "cores/VideoPlayer/Process/ios/ProcessInfoIOS.h"
 #include "cores/VideoPlayer/VideoRenderers/HwDecRender/RendererVTBGLES.h"
 #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
@@ -127,7 +133,7 @@ CWinSystemVisionOS::CWinSystemVisionOS() : CWinSystemBase(), m_lostDeviceTimer(t
 
   m_winEvents = std::make_unique<CWinEventsVisionOS>();
 
-  CAESinkDARWINTVOS::Register();
+  CAESinkDARWINIOS::Register();
 }
 
 CWinSystemVisionOS::~CWinSystemVisionOS()
