@@ -1,10 +1,9 @@
 # ANGLE commit pinned for visionOS port.
-# Branch: chromium/6611 — confirmed Metal CALayer surface support.
-# Commit hash verified against https://chromium.googlesource.com/angle/angle
-#
-# Source is fetched via git clone (not a tarball) so that dotfiles
-# (notably .gn, the gn build-root marker) are preserved.
-# Update ANGLE_COMMIT when bumping.
+# Pinned to a recent tip-of-tree main commit.
+# Source is fetched via gclient (not a tarball) so that dotfiles
+# (.gn, the gn build-root marker) and sub-repos are preserved.
+# Update ANGLE_COMMIT when bumping; verify against:
+#   https://chromium.googlesource.com/angle/angle/+/refs/heads/main
 LIBNAME=angle
-ANGLE_COMMIT=85edb907199e7a15e4ac30ea3fd0bbed021880ad
+ANGLE_COMMIT=5f0e794041ecec196ea148d3ee08db5ed4c2fc02
 BYPRODUCT=libEGL.a
