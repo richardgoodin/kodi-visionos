@@ -1,6 +1,6 @@
 -include ../../Makefile.include
 include ANGLE-VERSION
-DEPS = Makefile ANGLE-VERSION ../../download-files.include
+DEPS = Makefile ANGLE-VERSION
 
 ifeq ($(CROSS_COMPILING), yes)
   DEPS += ../../Makefile.include
@@ -10,39 +10,28 @@ ifeq ($(CROSS_COMPILING), yes)
 else
   ROOT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
   PREFIX ?= $(ROOT_DIR)/angle-install
-  # ANGLE is fetched directly from Googlesource; the ARCHIVE variable is just
-  # the commit hash + .tar.gz, so BASE_URL must include the full path prefix.
-  BASE_URL ?= https://chromium.googlesource.com/angle/angle/+archive
-  RETRIEVE_TOOL := curl
-  RETRIEVE_TOOL_FLAGS := -LsS --create-dirs --retry 10 --retry-connrefused -o
-  ARCHIVE_TOOL := tar
-  ARCHIVE_TOOL_FLAGS := --strip-components=1 -xf
   ifeq ($(PLATFORM),)
     PLATFORM = native
-    TARBALLS_LOCATION = $(ROOT_DIR)
-    HASH_TOOL = sha512sum
-    HASH_TOOL_FLAGS = -c --status
     CMAKE = cmake
     NINJA = ninja
   endif
 endif
 
-# ANGLE is configured with GN (Chromium build), but for cross-platform
-# dependency purposes we build the standalone cmake-angle / gn wrapper.
-# The actual gn/ninja invocation is documented below; the Makefile
-# delegates to a helper script so the depends infrastructure can track
-# the .installed sentinel file cleanly.
+# ANGLE is configured with GN (Chromium's meta-build system) and compiled
+# with ninja.  Source is obtained via git clone so that hidden files (notably
+# .gn, the build-root marker) are preserved — Googlesource .tar.gz archives
+# strip dotfiles and break gn gen.
 #
 # PREREQUISITES (must be installed on the host build machine):
-#   depot_tools  (adds `gn` and `ninja` to PATH)
-#   Python 3
+#   gn    (download from https://chrome-infra-packages.appspot.com/dl/gn/gn/mac-arm64/+/latest)
+#   ninja (brew install ninja)
 #   Xcode with visionOS SDK
 #
 # BUILD STEPS (performed by this Makefile):
-#   1. Fetch ANGLE source via gclient from the pinned commit
-#   2. Run gn gen with is_debug=false target_os="xros" target_cpu="arm64"
+#   1. git clone ANGLE at the pinned commit into $(PLATFORM)/
+#   2. gn gen with is_debug=false target_os="xros" target_cpu="arm64"
 #   3. ninja angle libEGL libGLESv2
-#   4. Install headers and .a/.dylib files into PREFIX
+#   4. Install headers and static libraries into PREFIX
 
 ANGLE_GN_ARGS := \
   is_debug=false \
@@ -53,17 +42,22 @@ ANGLE_GN_ARGS := \
   angle_use_commit_id=false \
   is_component_build=false
 
-# GN/ninja places static libraries under out/Release/obj/, not out/Release/
+ANGLE_REPO = https://chromium.googlesource.com/angle/angle.git
+
+# GN/ninja places static libraries under out/Release/obj/
 LIBDYLIB_EGL  = $(PLATFORM)/out/Release/obj/libEGL.a
 LIBDYLIB_GLES = $(PLATFORM)/out/Release/obj/libGLESv2.a
 
-include ../../download-files.include
 all: .installed-$(PLATFORM)
 
-.configured-$(PLATFORM): $(DEPS) | $(TARBALLS_LOCATION)/$(ARCHIVE).$(HASH_TYPE)
-	rm -rf $(PLATFORM)/*; mkdir -p $(PLATFORM)
-	cd $(PLATFORM); $(ARCHIVE_TOOL) $(ARCHIVE_TOOL_FLAGS) $(TARBALLS_LOCATION)/$(ARCHIVE)
-	cd $(PLATFORM); gn gen out/Release --args='$(ANGLE_GN_ARGS)'
+.cloned-$(PLATFORM): $(DEPS)
+	rm -rf $(PLATFORM); \
+	git clone --no-checkout $(ANGLE_REPO) $(PLATFORM) && \
+	cd $(PLATFORM) && git checkout $(ANGLE_COMMIT)
+	touch $@
+
+.configured-$(PLATFORM): .cloned-$(PLATFORM)
+	cd $(PLATFORM); gn gen out/Release "--args=$(ANGLE_GN_ARGS)"
 	touch $@
 
 $(LIBDYLIB_EGL): .configured-$(PLATFORM)
@@ -84,7 +78,7 @@ $(LIBDYLIB_EGL): .configured-$(PLATFORM)
 
 clean:
 	rm -rf $(PLATFORM)
-	rm -f .installed-$(PLATFORM) .configured-$(PLATFORM)
+	rm -f .installed-$(PLATFORM) .configured-$(PLATFORM) .cloned-$(PLATFORM)
 
 distclean:
-	rm -rf $(PLATFORM) .installed-$(PLATFORM) .configured-$(PLATFORM)
+	rm -rf $(PLATFORM) .installed-$(PLATFORM) .configured-$(PLATFORM) .cloned-$(PLATFORM)
