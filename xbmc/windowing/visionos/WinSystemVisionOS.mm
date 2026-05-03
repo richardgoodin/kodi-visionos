@@ -306,13 +306,35 @@ void CWinSystemVisionOS::OnAppFocusChange(bool focus)
 
 bool CWinSystemVisionOS::InitDisplayLink(CVideoSyncVisionOS* syncImpl)
 {
-  // VISIONOS_STAGE2: use UIWindowScene displayLink for proper pacing
   m_pDisplayLink->callbackClass.videoSyncImpl = syncImpl;
-  m_pDisplayLink->impl =
-      [UIScreen.mainScreen displayLinkWithTarget:m_pDisplayLink->callbackClass
-                                        selector:@selector(runDisplayLink)];
+
+  // UIScreen.mainScreen is unavailable on visionOS; obtain the display link
+  // from the active UIWindowScene instead.
+  __block CADisplayLink* link = nil;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
+    {
+      UIWindowScene* windowScene = [scene isKindOfClass:UIWindowScene.class]
+                                       ? static_cast<UIWindowScene*>(scene)
+                                       : nil;
+      if (windowScene)
+      {
+        link = [windowScene displayLinkWithTarget:m_pDisplayLink->callbackClass
+                                         selector:@selector(runDisplayLink)];
+        break;
+      }
+    }
+  });
+
+  if (!link)
+  {
+    CLog::Log(LOGERROR, "CWinSystemVisionOS::InitDisplayLink: no UIWindowScene available");
+    return false;
+  }
+
+  m_pDisplayLink->impl = link;
   [m_pDisplayLink->impl addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-  return m_pDisplayLink->impl != nil;
+  return true;
 }
 
 void CWinSystemVisionOS::DeinitDisplayLink()
