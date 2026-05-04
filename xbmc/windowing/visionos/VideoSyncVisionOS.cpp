@@ -9,12 +9,18 @@
 #include "VideoSyncVisionOS.h"
 
 #include "ServiceBroker.h"
+#include "cores/VideoPlayer/VideoReferenceClock.h"
 #include "utils/MathUtils.h"
 #include "utils/TimeUtils.h"
+#include "utils/XTimeUtils.h"
 #include "utils/log.h"
 #include "windowing/GraphicContext.h"
 #include "windowing/WinSystem.h"
 #include "windowing/visionos/WinSystemVisionOS.h"
+
+#include <chrono>
+
+using namespace std::chrono_literals;
 
 bool CVideoSyncVisionOS::Setup()
 {
@@ -40,7 +46,7 @@ void CVideoSyncVisionOS::Run(CEvent& stopEvent)
       uint32_t diff = curVblankCount - prevVblankCount;
       prevVblankCount = curVblankCount;
       // Notify reference clock about the number of vblanks
-      UpdateClock(diff, CurrentHostCounter(), m_refClock);
+      m_refClock->UpdateClock(diff, CurrentHostCounter());
     }
     // Sleep a short interval between polls to avoid busy-spinning
     KODI::TIME::Sleep(2ms);

@@ -26,6 +26,8 @@
 #import "platform/darwin/ios/XBMCController.h"
 #elif defined(TARGET_DARWIN_TVOS)
 #import "platform/darwin/tvos/XBMCController.h"
+#elif defined(TARGET_DARWIN_VISIONOS)
+#import "platform/darwin/visionos/XBMCController.h"
 #endif
 
 #import <UIKit/UIKit.h>

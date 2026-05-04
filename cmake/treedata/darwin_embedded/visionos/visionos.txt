@@ -1,0 +1,4 @@
+xbmc/platform/common/speech           platform/common/speech
+xbmc/platform/darwin/visionos          platform/visionos
+xbmc/platform/darwin/visionos/powermanagement   platform/darwin/visionos/powermanagement
+xbmc/windowing/visionos                windowing/visionos

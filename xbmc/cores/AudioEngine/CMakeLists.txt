@@ -139,7 +139,9 @@ endif()
 if(CORE_SYSTEM_NAME STREQUAL darwin_embedded)
   list(APPEND SOURCES Sinks/darwin/CoreAudioHelpers.cpp)
   list(APPEND HEADERS Sinks/darwin/CoreAudioHelpers.h)
-  if("ios" IN_LIST CORE_PLATFORM_NAME_LC)
+  if("ios" IN_LIST CORE_PLATFORM_NAME_LC OR "visionos" IN_LIST CORE_PLATFORM_NAME_LC)
+    # visionOS uses the iOS audio sink (AVAudioSession + AudioUnit), which is
+    # the closest available match on visionOS.
     list(APPEND SOURCES Sinks/AESinkDARWINIOS.mm)
     list(APPEND HEADERS Sinks/AESinkDARWINIOS.h)
   elseif("tvos" IN_LIST CORE_PLATFORM_NAME_LC)

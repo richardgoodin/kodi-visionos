@@ -57,7 +57,8 @@
     didFinishLaunchingWithOptions:(NSDictionary*)launchOptions
 {
   // UI setup
-  self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+  // visionOS: UIScreen is unavailable; window geometry is managed by the system.
+  self.window = [[UIWindow alloc] init];
   self.window.rootViewController = [XBMCController new];
   [self.window makeKeyAndVisible];
   [self.xbmcController startAnimation];

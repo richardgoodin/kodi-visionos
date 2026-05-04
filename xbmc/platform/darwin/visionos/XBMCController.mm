@@ -131,7 +131,11 @@ XBMCController* g_xbmcController;
 
 - (CGRect)fullscreenSubviewFrame
 {
-  return UIScreen.mainScreen.bounds;
+  // UIScreen is unavailable on visionOS; return the window bounds if available,
+  // otherwise fall back to a fixed 1920×1080 logical canvas.
+  if (self.view.window)
+    return self.view.window.bounds;
+  return CGRectMake(0, 0, 1920, 1080);
 }
 
 - (void)didReceiveMemoryWarning

@@ -12,6 +12,8 @@
 #include "platform/darwin/ios/XBMCController.h"
 #elif defined(TARGET_DARWIN_TVOS)
 #include "platform/darwin/tvos/XBMCController.h"
+#elif defined(TARGET_DARWIN_VISIONOS)
+#include "platform/darwin/visionos/XBMCController.h"
 #endif
 
 #import <AVFoundation/AVFoundation.h>

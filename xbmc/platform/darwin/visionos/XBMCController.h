@@ -17,6 +17,9 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
+// ANGLE EGL types used in the interface below.
+#include <EGL/egl.h>
+
 @class VisionOSDisplayManager;
 @class VisionOSGLView;
 @class DarwinEmbedNowPlayingInfoManager;

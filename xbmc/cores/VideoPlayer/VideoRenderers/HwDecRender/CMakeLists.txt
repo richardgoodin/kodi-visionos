@@ -34,7 +34,10 @@ if(CORE_SYSTEM_NAME STREQUAL osx)
   endif()
 endif()
 
-if(CORE_SYSTEM_NAME STREQUAL darwin_embedded)
+# RendererVTBGLES uses CVOpenGLESTextureCache and native GLES APIs that are
+# unavailable on visionOS.  Exclude it from the visionOS build; visionOS will
+# use a Metal-backed path instead (Stage 2).
+if(CORE_SYSTEM_NAME STREQUAL darwin_embedded AND NOT "visionos" IN_LIST CORE_PLATFORM_NAME_LC)
   if(TARGET ${APP_NAME_LC}::OpenGLES)
     list(APPEND SOURCES RendererVTBGLES.cpp)
     list(APPEND HEADERS RendererVTBGLES.h)

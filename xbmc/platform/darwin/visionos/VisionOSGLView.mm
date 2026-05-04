@@ -16,6 +16,9 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <Metal/Metal.h>
 
+// GLES headers from ANGLE
+#include <GLES3/gl3.h>
+
 // ANGLE EGL extension for Metal layer surfaces
 #ifndef EGL_ANGLE_platform_angle_metal
 #define EGL_ANGLE_platform_angle_metal 1
@@ -71,7 +74,7 @@
       EGL_NONE};
 
   m_eglDisplay = eglGetPlatformDisplay(EGL_PLATFORM_ANGLE_ANGLE,
-                                       reinterpret_cast<void*>(metalDevice),
+                                       (__bridge void*)metalDevice,
                                        displayAttribs);
   if (m_eglDisplay == EGL_NO_DISPLAY)
   {
@@ -135,7 +138,7 @@
   // Create window surface from the CAMetalLayer
   CAMetalLayer* metalLayer = static_cast<CAMetalLayer*>(self.layer);
   m_eglSurface = eglCreateWindowSurface(m_eglDisplay, m_eglConfig,
-                                        reinterpret_cast<EGLNativeWindowType>(metalLayer), nullptr);
+                                        (__bridge EGLNativeWindowType)metalLayer, nullptr);
   if (m_eglSurface == EGL_NO_SURFACE)
   {
     CLog::Log(LOGERROR, "VisionOSGLView: eglCreateWindowSurface failed (err={})",
@@ -193,9 +196,8 @@
 
 - (CGFloat)getScreenScale
 {
-  // visionOS reports a single unified display; use the window's scale when available
-  UIScreen* screen = UIScreen.mainScreen;
-  return screen ? screen.scale : 2.0f;
+  // UIScreen is unavailable on visionOS; use a fixed logical scale of 2×.
+  return 2.0f;
 }
 
 - (void)layoutSubviews
@@ -211,7 +213,7 @@
 
     CAMetalLayer* metalLayer = static_cast<CAMetalLayer*>(self.layer);
     m_eglSurface = eglCreateWindowSurface(m_eglDisplay, m_eglConfig,
-                                          reinterpret_cast<EGLNativeWindowType>(metalLayer),
+                                          (__bridge EGLNativeWindowType)metalLayer,
                                           nullptr);
     if (m_eglSurface != EGL_NO_SURFACE)
     {

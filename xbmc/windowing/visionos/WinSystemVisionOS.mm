@@ -21,8 +21,13 @@
 // ProcessInfoIOS / RPProcessInfoIOS are pure C++ stubs; no iOS-specific APIs.
 // They register VTB + GLES capabilities that are identical on visionOS.
 #include "cores/VideoPlayer/Process/ios/ProcessInfoIOS.h"
-#include "cores/VideoPlayer/VideoRenderers/HwDecRender/RendererVTBGLES.h"
+// RendererVTBGLES is excluded from the visionOS build (CVOpenGLESTextureCache
+// and the native GLES sync APIs are unavailable on visionOS).
 #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
+
+// ANGLE GLES headers — glGetString and friends come from ANGLE, not the
+// unavailable system OpenGL ES framework on visionOS.
+#include <GLES3/gl3.h>
 #include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
 #include "filesystem/SpecialProtocol.h"
 #include "guilib/DispResource.h"
@@ -42,6 +47,7 @@
 
 #import "platform/darwin/DarwinUtils.h"
 #import "platform/darwin/visionos/VisionOSDisplayManager.h"
+#import "platform/darwin/visionos/VisionOSGLView.h"
 #import "platform/darwin/visionos/XBMCController.h"
 
 #include <memory>
@@ -170,7 +176,11 @@ bool CWinSystemVisionOS::CreateNewWindow(const std::string& name,
 
   m_eglext = " ";
 
-  const char* tmpExtensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+  // Use EGL to query extension strings; the system OpenGL ES glGetString is
+  // unavailable on visionOS (we go through ANGLE).
+  // The EGL display lives in VisionOSGLView; retrieve it from the controller.
+  EGLDisplay eglDisplay = g_xbmcController.glView.eglDisplay;
+  const char* tmpExtensions = eglQueryString(eglDisplay, EGL_EXTENSIONS);
   if (tmpExtensions != nullptr)
   {
     m_eglext += tmpExtensions;
@@ -184,7 +194,7 @@ bool CWinSystemVisionOS::CreateNewWindow(const std::string& name,
   VTB::CDecoder::Register();
   VIDEOPLAYER::CRendererFactory::ClearRenderer();
   CLinuxRendererGLES::Register();
-  CRendererVTB::Register();
+  // CRendererVTB not available on visionOS (CVOpenGLESTextureCache unavailable).
   VIDEOPLAYER::CProcessInfoIOS::Register();
   RETRO::CRPProcessInfoIOS::Register();
   RETRO::CRPProcessInfoIOS::RegisterRendererFactory(new RETRO::CRendererFactoryOpenGLES);
@@ -314,31 +324,12 @@ bool CWinSystemVisionOS::InitDisplayLink(CVideoSyncVisionOS* syncImpl)
 {
   m_pDisplayLink->callbackClass.videoSyncImpl = syncImpl;
 
-  // UIScreen.mainScreen is unavailable on visionOS; obtain the display link
-  // from the active UIWindowScene instead.
-  __block CADisplayLink* link = nil;
-  dispatch_sync(dispatch_get_main_queue(), ^{
-    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes)
-    {
-      UIWindowScene* windowScene = [scene isKindOfClass:UIWindowScene.class]
-                                       ? static_cast<UIWindowScene*>(scene)
-                                       : nil;
-      if (windowScene)
-      {
-        link = [windowScene displayLinkWithTarget:m_pDisplayLink->callbackClass
-                                         selector:@selector(runDisplayLink)];
-        break;
-      }
-    }
-  });
-
-  if (!link)
-  {
-    CLog::Log(LOGERROR, "CWinSystemVisionOS::InitDisplayLink: no UIWindowScene available");
-    return false;
-  }
-
-  m_pDisplayLink->impl = link;
+  // Create a CADisplayLink attached to the main run loop.
+  // UIWindowScene.displayLinkWithTarget:selector: is not available on visionOS 1.0;
+  // CADisplayLink with the main run loop is the supported alternative.
+  m_pDisplayLink->impl = [CADisplayLink
+      displayLinkWithTarget:m_pDisplayLink->callbackClass
+                   selector:@selector(runDisplayLink)];
   [m_pDisplayLink->impl addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
   return true;
 }

@@ -38,7 +38,7 @@ endif()
 # the flags travel through FindFFMPEG correctly.
 if(DEFINED ANGLE_FRAMEWORKS_DIR)
   list(APPEND CMAKE_FRAMEWORK_PATH ${ANGLE_FRAMEWORKS_DIR})
-  string(APPEND CMAKE_EXE_LINKER_FLAGS " -F${ANGLE_FRAMEWORKS_DIR} -framework libEGL -framework libGLESv2")
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -F${ANGLE_FRAMEWORKS_DIR} -framework libEGL -framework libGLESv2 -framework Metal")
 elseif(DEFINED ANGLE_LIBRARY_DIR)
   # Fallback: static lib layout (legacy)
   link_directories(${ANGLE_LIBRARY_DIR})
