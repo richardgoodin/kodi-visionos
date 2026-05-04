@@ -46,9 +46,8 @@ endif
 #        hook, which we intentionally do not run).
 #      - angle_build_tests=false: avoids the testing → rust GN import
 #        chain and dramatically speeds up the build.
-#      - clang_use_chrome_lld=false + use_custom_libcxx=false: use the
-#        system linker and libc++; the visionOS SDK's libc++ is preferred
-#        here over Chromium's bundled copy.
+#      - use_custom_libcxx=false: use the system libc++ from the visionOS SDK
+#        rather than Chromium's bundled copy.
 #   3. gn gen out/Release
 #   4. ninja angle libEGL libGLESv2
 #   5. Install headers and framework bundles into PREFIX
@@ -86,8 +85,8 @@ all: .installed-$(PLATFORM)
 	#   entire rust dependency chain at GN level.
 	# - angle_build_tests=false: avoids the testing/test.gni → rust path
 	#   and speeds up the build considerably.
-	# - clang_use_chrome_lld=false + use_custom_libcxx=false: use the
-	#   system linker and libc++ from Xcode rather than Chromium's copies.
+	# - use_custom_libcxx=false: use the system libc++ from Xcode rather than
+	#   Chromium's bundled copy.
 	printf '%s\n' \
 	  'is_debug = false' \
 	  'target_os = "ios"' \
@@ -100,7 +99,6 @@ all: .installed-$(PLATFORM)
 	  'is_component_build = false' \
 	  'enable_rust = false' \
 	  'angle_build_tests = false' \
-	  'clang_use_chrome_lld = false' \
 	  'use_custom_libcxx = false' \
 	  'treat_warnings_as_errors = false' \
 	  > $(ANGLE_SRC)/out/Release/args.gn
