@@ -19,9 +19,6 @@
 #include <list>
 #include <mutex>
 
-static CCriticalSection g_inputCond;
-static std::list<XBMC_Event> events;
-
 CWinEventsVisionOS::CWinEventsVisionOS() : CThread("CWinEventsVisionOS")
 {
   CLog::Log(LOGDEBUG, "CWinEventsVisionOS::CWinEventsVisionOS");
@@ -42,8 +39,8 @@ void CWinEventsVisionOS::MessagePush(XBMC_Event* newEvent)
 
 size_t CWinEventsVisionOS::GetQueueSize()
 {
-  std::unique_lock lock(g_inputCond);
-  return events.size();
+  std::unique_lock lock(m_eventsCond);
+  return m_events.size();
 }
 
 bool CWinEventsVisionOS::MessagePump()
@@ -55,11 +52,11 @@ bool CWinEventsVisionOS::MessagePump()
   {
     XBMC_Event pumpEvent;
     {
-      std::unique_lock lock(g_inputCond);
-      if (events.empty())
+      std::unique_lock lock(m_eventsCond);
+      if (m_events.empty())
         return ret;
-      pumpEvent = events.front();
-      events.pop_front();
+      pumpEvent = m_events.front();
+      m_events.pop_front();
     }
 
     if (appPort)
