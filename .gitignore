@@ -107,6 +107,15 @@ cmake_install.cmake
 /*.diff
 /*.patch
 /kodi-build*/
+/tools/depot_tools/
+/tools/depends/target/angle/angle-install/
+/tools/depends/target/angle/native/
+/tools/depends/target/angle/.cloned-*
+/tools/depends/target/angle/.configured-*
+/tools/depends/target/angle/.installed-*
+/tools/depends/target/**/*-target-debug/
+/tools/depends/target/**/*-target-release/
+/.clinerules
 /gtestresults.xml
 
 # /addons/

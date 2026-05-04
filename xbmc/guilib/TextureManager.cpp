@@ -33,6 +33,9 @@
 #elif defined(TARGET_DARWIN_TVOS)
 #define WIN_SYSTEM_CLASS CWinSystemTVOS
 #include "windowing/tvos/WinSystemTVOS.h" // for g_Windowing in CGUITextureManager::FreeUnusedTextures
+#elif defined(TARGET_DARWIN_VISIONOS)
+#define WIN_SYSTEM_CLASS CWinSystemVisionOS
+#include "windowing/visionos/WinSystemVisionOS.h" // for IsBackgrounded in CGUITextureManager::FreeUnusedTextures
 #endif
 
 #if defined(HAS_GL) || defined(HAS_GLES)

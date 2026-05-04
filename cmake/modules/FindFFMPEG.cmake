@@ -194,6 +194,12 @@ macro(buildFFMPEG)
       set(postproc_pkg_config_search "postproc=`PKG_CONFIG_PATH=${DEPENDS_PATH}/lib/pkgconfig ${PKG_CONFIG_EXECUTABLE} --libs --static libpostproc`")
     endif()
 
+    if("visionos" IN_LIST CORE_PLATFORM_NAME_LC)
+      list(APPEND PATCH_COMMAND COMMAND ${CMAKE_COMMAND} -E copy
+                                ${CMAKE_SOURCE_DIR}/tools/depends/target/ffmpeg/visionos-videotoolbox-no-gles-compat-key.patch
+                                <SOURCE_DIR>)
+    endif()
+
     if(CMAKE_GENERATOR STREQUAL Xcode)
       set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_GENERATOR CMAKE_GENERATOR "Unix Makefiles")
     endif()

@@ -58,7 +58,8 @@ info "  visionOS SDK $SDK_VERSION at $SDK_PATH — OK"
 
 # ── Step 2: Build ANGLE ────────────────────────────────────────────────────────
 ANGLE_DEPENDS_DIR="$KODI_DIR/tools/depends/target/angle"
-ANGLE_PREFIX="$KODI_DIR/tools/depends/angle-install"
+ANGLE_PREFIX="$KODI_DIR/tools/depends/target/angle/angle-install"
+ANGLE_FRAMEWORKS_DIR="$ANGLE_PREFIX/Frameworks"
 
 if [ "$SKIP_ANGLE" -eq 0 ]; then
   info "Building ANGLE for visionOS..."
@@ -72,11 +73,11 @@ if [ "$SKIP_ANGLE" -eq 0 ]; then
   fi
 
   make -j"$JOBS" -C "$ANGLE_DEPENDS_DIR" PREFIX="$ANGLE_PREFIX"
-  info "  ANGLE build complete. Headers: $ANGLE_PREFIX/include, Libs: $ANGLE_PREFIX/lib"
+  info "  ANGLE build complete. Headers: $ANGLE_PREFIX/include, Frameworks: $ANGLE_FRAMEWORKS_DIR"
 else
   info "Skipping ANGLE build (--skip-angle)."
-  if [ ! -f "$ANGLE_PREFIX/lib/libEGL.a" ]; then
-    die "ANGLE not built yet. Run without --skip-angle first."
+  if [ ! -d "$ANGLE_FRAMEWORKS_DIR/libEGL.framework" ]; then
+    die "ANGLE not built yet (libEGL.framework missing). Run without --skip-angle first."
   fi
 fi
 
@@ -121,7 +122,7 @@ info "Configuring CMake for visionOS ($BUILD_TYPE)..."
   -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/install" \
   -DCORE_SYSTEM_NAME=visionos \
   -DANGLE_INCLUDE_DIR="$ANGLE_PREFIX/include" \
-  -DANGLE_LIBRARY_DIR="$ANGLE_PREFIX/lib" \
+  -DANGLE_FRAMEWORKS_DIR="$ANGLE_FRAMEWORKS_DIR" \
   ..
 
 # ── Step 5: Build ──────────────────────────────────────────────────────────────
@@ -135,5 +136,5 @@ echo ""
 echo "═══════════════════════════════════════════════════════════"
 echo " Build complete!"
 echo " App bundle: $BUILD_DIR/$BUILD_TYPE/Kodi.app"
-echo " ANGLE libs: $ANGLE_PREFIX/lib"
+echo " ANGLE frameworks: $ANGLE_FRAMEWORKS_DIR"
 echo "═══════════════════════════════════════════════════════════"

@@ -1,0 +1,25 @@
+From: Kodi visionOS port
+Subject: [PATCH] videotoolbox: exclude OpenGL ES pixel buffer keys on visionOS
+
+visionOS (TARGET_OS_XR) sets TARGET_OS_IPHONE=1 but does not export
+kCVPixelBufferOpenGLESCompatibilityKey (iOS/tvOS only) or
+kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey (macOS only); both
+symbols are marked API_UNAVAILABLE(visionos) and the compiler emits a
+hard error.
+
+Guard both branches with !TARGET_OS_XR so visionOS skips both keys
+entirely.  VideoToolbox on visionOS does not need either hint: it uses
+IOSurface natively via CVMetalTextureCache without any OpenGL bridge.
+
+diff --git a/libavcodec/videotoolbox.c b/libavcodec/videotoolbox.c
+--- a/libavcodec/videotoolbox.c
++++ b/libavcodec/videotoolbox.c
+@@ -820,7 +820,7 @@ static CFDictionaryRef videotoolbox_buffer_attributes_create(int width,
+     CFDictionarySetValue(buffer_attributes, kCVPixelBufferWidthKey, w);
+     CFDictionarySetValue(buffer_attributes, kCVPixelBufferHeightKey, h);
+-#if TARGET_OS_IPHONE
++#if TARGET_OS_IPHONE && !TARGET_OS_XR
+     CFDictionarySetValue(buffer_attributes, kCVPixelBufferOpenGLESCompatibilityKey, kCFBooleanTrue);
+-#else
++#elif !TARGET_OS_XR
+     CFDictionarySetValue(buffer_attributes, kCVPixelBufferIOSurfaceOpenGLTextureCompatibilityKey, kCFBooleanTrue);

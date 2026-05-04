@@ -64,6 +64,12 @@ if(CORE_SYSTEM_NAME STREQUAL darwin_embedded)
     elseif(CORE_PLATFORM_NAME STREQUAL visionos)
       set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "7")
       set(CMAKE_XCODE_ATTRIBUTE_XROS_DEPLOYMENT_TARGET @target_minver@)
+      # visionOS: pthreads are in libc; there is no separate -lpthread flag.
+      # Pre-satisfy FindThreads so find_package(Threads REQUIRED) succeeds.
+      set(CMAKE_THREAD_LIBS_INIT "" CACHE STRING "Thread library" FORCE)
+      set(CMAKE_USE_PTHREADS_INIT 1 CACHE BOOL "Use pthreads" FORCE)
+      set(CMAKE_HAVE_THREADS_LIBRARY 1 CACHE BOOL "Threads in libc" FORCE)
+      set(Threads_FOUND TRUE CACHE BOOL "Threads found" FORCE)
     else()
       set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
       set(CMAKE_XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET @target_minver@)

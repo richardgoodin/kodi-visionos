@@ -21,6 +21,10 @@
 #include "platform/darwin/tvos/TVOSKeyboardView.h"
 #include "platform/darwin/tvos/XBMCController.h"
 #define KEYBOARDVIEW_CLASS TVOSKeyboardView
+#elif defined(TARGET_DARWIN_VISIONOS)
+#include "platform/darwin/visionos/VisionOSKeyboardView.h"
+#include "platform/darwin/visionos/XBMCController.h"
+#define KEYBOARDVIEW_CLASS VisionOSKeyboardView
 #endif
 
 #define SHARED_INSTANCE_SELECTOR @selector(sharedInstance)

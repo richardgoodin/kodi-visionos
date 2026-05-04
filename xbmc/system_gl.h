@@ -24,7 +24,19 @@
 #include <OpenGL/gl3ext.h>
 #endif
 #elif HAS_GLES >= 2
-#if defined(TARGET_DARWIN)
+#if defined(TARGET_DARWIN_VISIONOS)
+// visionOS has no native OpenGL ES; ANGLE provides GLES over Metal.
+// ANGLE ships Khronos-layout headers (GLES2/, GLES3/) — use them directly so
+// the system OpenGLES.framework headers (which mark everything unavailable on
+// visionOS) are never pulled in.
+#if HAS_GLES == 3
+#include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
+#else
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#endif
+#elif defined(TARGET_DARWIN)
 // ios/tvos GLES3 headers include GLES2 definitions, so we can only include one.
 #if HAS_GLES == 3
 #include <OpenGLES/ES3/gl.h>
