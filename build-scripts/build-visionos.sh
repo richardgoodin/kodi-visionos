@@ -298,6 +298,8 @@ else
     -DCMAKE_USE_WIN32_THREADS_INIT=0 \
     -DCMAKE_USE_PTHREADS_INIT=1 \
     -DThreads_FOUND=TRUE \
+    -DDEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-}" \
+    -DCODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-Apple Development}" \
     "$KODI_DIR"
 
   ok "CMake configure complete."
@@ -311,6 +313,8 @@ cd "$BUILD_DIR"
 xcodebuild \
   -configuration "$BUILD_TYPE" \
   -target ALL_BUILD \
+  -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration \
   -jobs "$JOBS"
 
 # visionOS Xcode builds go to build/<Config>-xros/ rather than <Config>/
