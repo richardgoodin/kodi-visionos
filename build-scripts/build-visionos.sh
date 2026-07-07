@@ -298,9 +298,8 @@ else
     -DCMAKE_USE_WIN32_THREADS_INIT=0 \
     -DCMAKE_USE_PTHREADS_INIT=1 \
     -DThreads_FOUND=TRUE \
-    -DDEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-}" \
-    -DCODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-Apple Development}" \
     -DPLATFORM_BUNDLE_IDENTIFIER="${PLATFORM_BUNDLE_IDENTIFIER:-org.xbmc.kodi-visionos}" \
+    -DDEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:-}" \
     "$KODI_DIR"
 
   ok "CMake configure complete."
@@ -316,8 +315,7 @@ xcodebuild \
   -target ALL_BUILD \
   -allowProvisioningUpdates \
   -allowProvisioningDeviceRegistration \
-  -jobs "$JOBS" \
-  install
+  -jobs "$JOBS"
 
 # visionOS Xcode builds go to build/<Config>-xros/ rather than <Config>/
 APP_BUNDLE="$BUILD_DIR/build/${BUILD_TYPE}-xros/Kodi.app"

@@ -37,7 +37,7 @@ if(NOT TARGET LibDvdCSS::LibDvdCSS)
 
   if(APPLE)
     set(${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_LINK_LIBRARIES "-framework CoreFoundation")
-    if(NOT CORE_SYSTEM_NAME STREQUAL darwin_embedded)
+    if(NOT CORE_SYSTEM_NAME STREQUAL darwin_embedded AND NOT CORE_SYSTEM_NAME STREQUAL visionos)
       list(APPEND ${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_LINK_LIBRARIES "-framework IOKit")
     endif()
     string(REPLACE ";" " " LIBDVDCSS_FLAGS "${${${CMAKE_FIND_PACKAGE_NAME}_MODULE}_LINK_LIBRARIES}")

@@ -93,6 +93,7 @@ all: .installed-$(PLATFORM)
 	  'target_cpu = "arm64"' \
 	  'target_platform = "iphoneos"' \
 	  'target_environment = "device"' \
+	  'ios_enable_code_signing = false' \
 	  'ios_sdk_name = "xros"' \
 	  'angle_enable_metal = true' \
 	  'angle_enable_gl = false' \

@@ -42,7 +42,12 @@ unset(_addons)
 
 add_custom_command(TARGET ${APP_NAME_LC} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/${CORE_BUILD_DIR}/DllPaths_generated.h
-                                     ${CMAKE_BINARY_DIR}/xbmc/DllPaths_generated.h)
+                                     ${CMAKE_BINARY_DIR}/xbmc/DllPaths_generated.h
+    # visionOS: embed provisioning profile + genuine re-sign (installs on device)
+    COMMAND "CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            "CODE_SIGN_IDENTITY=${CODE_SIGN_IDENTITY}"
+            ${CMAKE_SOURCE_DIR}/tools/darwin/Support/Codesign-visionos.command)
+
 
 configure_file(${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/Credits.html.in
                ${CMAKE_BINARY_DIR}/xbmc/platform/darwin/Credits.html @ONLY)

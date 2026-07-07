@@ -66,7 +66,7 @@ if(NOT TARGET ${APP_NAME_LC}::${CMAKE_FIND_PACKAGE_NAME})
     if(APPLE)
       set(patches "${CORE_SOURCE_DIR}/tools/depends/target/${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}/002-darwin-dlopen_searchpath.patch")
 
-      if(CORE_SYSTEM_NAME STREQUAL darwin_embedded)
+      if(CORE_SYSTEM_NAME STREQUAL darwin_embedded OR CORE_SYSTEM_NAME STREQUAL visionos)
         list(APPEND patches "${CORE_SOURCE_DIR}/tools/depends/target/${${CMAKE_FIND_PACKAGE_NAME}_MODULE_LC}/001-darwinembed_DiskArbitration-revert.patch")
 
         if(${CORE_PLATFORM_NAME} STREQUAL "tvos")

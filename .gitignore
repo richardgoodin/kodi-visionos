@@ -277,3 +277,8 @@ exclude_dll.txt
 
 # clangd index
 .cache/
+
+# Signing credentials — local dev only, never commit
+/signing/
+/xbmc/platform/darwin/visionos/signing/
+*.mobileprovision

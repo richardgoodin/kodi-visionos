@@ -90,7 +90,7 @@ elseif(CORE_SYSTEM_NAME STREQUAL android)
     list(APPEND ffmpeg_conf --cpu=i686 --disable-mmx --disable-asm)
     list(APPEND ffmpeg_conf --extra-cflags=-mno-stackrealign)
   endif()
-elseif(CORE_SYSTEM_NAME STREQUAL darwin_embedded)
+elseif(CORE_SYSTEM_NAME STREQUAL darwin_embedded OR CORE_SYSTEM_NAME STREQUAL visionos)
   list(APPEND ffmpeg_conf --enable-videotoolbox
                           --disable-filter=yadif_videotoolbox
                           --target-os=darwin

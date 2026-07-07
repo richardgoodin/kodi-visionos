@@ -44,7 +44,7 @@ endif()
 
 list(APPEND DEPLIBS "-framework CoreFoundation" "-framework CoreVideo"
                     "-framework CoreAudio" "-framework AudioToolbox"
-                    "-framework QuartzCore"
+                    "-framework QuartzCore" "-framework MediaPlayer"
                     "-framework CFNetwork" "-framework CoreGraphics"
                     "-framework Foundation" "-framework UIKit"
                     "-framework CoreMedia" "-framework AVFoundation"

@@ -136,7 +136,7 @@ if(CORE_SYSTEM_NAME STREQUAL osx)
                       Sinks/osx/CoreAudioStream.h)
 endif()
 
-if(CORE_SYSTEM_NAME STREQUAL darwin_embedded)
+if(CORE_SYSTEM_NAME STREQUAL darwin_embedded OR CORE_SYSTEM_NAME STREQUAL visionos)
   list(APPEND SOURCES Sinks/darwin/CoreAudioHelpers.cpp)
   list(APPEND HEADERS Sinks/darwin/CoreAudioHelpers.h)
   if("ios" IN_LIST CORE_PLATFORM_NAME_LC OR "visionos" IN_LIST CORE_PLATFORM_NAME_LC)
