@@ -18,14 +18,23 @@ APP="${CODESIGNING_FOLDER_PATH}"
 PROFILE_SRC="${VISIONOS_PROVISIONING_PROFILE:-}"
 if [ -z "${PROFILE_SRC}" ]; then
   PROFILE_DIR="${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles"
+  # Bundle id of the app we are signing, e.g. com.goodin.kodi
+  BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${APP}/Info.plist" 2>/dev/null)
+  EXACT_APPID="${DEVELOPMENT_TEAM}.${BUNDLE_ID}"
+  WILDCARD_APPID="${DEVELOPMENT_TEAM}.*"
+  MATCH_EXACT=""; MATCH_WILDCARD=""; MATCH_TEAM=""
   for f in "${PROFILE_DIR}"/*.mobileprovision; do
     [ -e "$f" ] || continue
     security cms -D -i "$f" > /tmp/kodi_vos_scan.plist 2>/dev/null || continue
+    appid=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' /tmp/kodi_vos_scan.plist 2>/dev/null)
     team=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.developer.team-identifier' /tmp/kodi_vos_scan.plist 2>/dev/null)
-    if [ "$team" = "${DEVELOPMENT_TEAM}" ]; then
-      PROFILE_SRC="$f"; break
-    fi
+    [ "$team" = "${DEVELOPMENT_TEAM}" ] || continue
+    if [ "$appid" = "${EXACT_APPID}" ]; then MATCH_EXACT="$f"; fi
+    if [ "$appid" = "${WILDCARD_APPID}" ]; then MATCH_WILDCARD="$f"; fi
+    [ -z "${MATCH_TEAM}" ] && MATCH_TEAM="$f"
   done
+  # Prefer exact bundle-id match, then team wildcard, then any team profile.
+  PROFILE_SRC="${MATCH_EXACT:-${MATCH_WILDCARD:-${MATCH_TEAM}}}"
 fi
 if [ -z "${PROFILE_SRC}" ] || [ ! -e "${PROFILE_SRC}" ]; then
   echo "ERROR: no provisioning profile found for team ${DEVELOPMENT_TEAM}" >&2
@@ -34,9 +43,9 @@ if [ -z "${PROFILE_SRC}" ] || [ ! -e "${PROFILE_SRC}" ]; then
 fi
 
 # --- Resolve the signing identity from the team ---------------------------
-# The signing cert's name carries the team it was *issued* under (which may
-# differ from DEVELOPMENT_TEAM used by the profile). Match the single
-# "Apple Development" identity in the keychain. If more than one exists,
+# The signing cert name carries the team it was issued under, which may
+# differ from DEVELOPMENT_TEAM used by the profile. Match the single
+# Apple Development identity in the keychain. If more than one exists,
 # set VISIONOS_SIGN_IDENTITY to the desired 40-char hash to disambiguate.
 if [ -n "${VISIONOS_SIGN_IDENTITY:-}" ]; then
   IDENTITY="${VISIONOS_SIGN_IDENTITY}"
@@ -56,6 +65,15 @@ cp "${PROFILE_SRC}" "${APP}/embedded.mobileprovision"
 
 security cms -D -i "${APP}/embedded.mobileprovision" > /tmp/kodi_vos_pp.plist
 /usr/libexec/PlistBuddy -x -c 'Print Entitlements' /tmp/kodi_vos_pp.plist > /tmp/kodi_vos.entitlements
+
+# Sign nested frameworks individually first (the device validates each one).
+if [ -d "${APP}/Frameworks" ]; then
+  for fw in "${APP}/Frameworks"/*.framework; do
+    [ -d "$fw" ] || continue
+    echo "Signing framework $(basename "$fw")"
+    codesign --force --sign "${IDENTITY}" --timestamp=none "$fw"
+  done
+fi
 
 echo "Re-signing ${APP} with identity ${IDENTITY} (team ${DEVELOPMENT_TEAM})"
 codesign --force --sign "${IDENTITY}" \
