@@ -282,3 +282,5 @@ exclude_dll.txt
 /signing/
 /xbmc/platform/darwin/visionos/signing/
 *.mobileprovision
+xbmc/platform/darwin/Credits.html
+*.ips

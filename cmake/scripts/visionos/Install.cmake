@@ -40,9 +40,33 @@ if(ENABLE_XCODE_ADDONBUILD)
 endif()
 unset(_addons)
 
+# --- visionOS bundle payload staging (lifted from darwin_embedded) ------------
+# DllPaths copy first (copyframeworks-darwin_embedded reads it), then root files,
+# Python stdlib + dylib fixup, dylibs->frameworks, then the AppHome data payload.
+# Runs BEFORE the ANGLE-embed + codesign command so everything is signed.
 add_custom_command(TARGET ${APP_NAME_LC} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/${CORE_BUILD_DIR}/DllPaths_generated.h
                                      ${CMAKE_BINARY_DIR}/xbmc/DllPaths_generated.h
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${APP_NAME_LC}>
+                                     $<TARGET_FILE_DIR:${APP_NAME_LC}>/${APP_NAME}.bin
+    COMMAND "ACTION=build"
+            "APP_NAME=${APP_NAME}"
+            "XBMC_DEPENDS=${DEPENDS_PATH}"
+            "SRCROOT=${CMAKE_SOURCE_DIR}"
+            ${CMAKE_SOURCE_DIR}/tools/darwin/Support/CopyRootFiles-darwin_embedded.command
+    COMMAND "XBMC_DEPENDS=${DEPENDS_PATH}"
+            "PYTHON_VERSION=${PYTHON_VERSION}"
+            ${CMAKE_SOURCE_DIR}/tools/darwin/Support/copyframeworks-darwin_embedded.command
+    COMMAND ${CMAKE_SOURCE_DIR}/tools/darwin/Support/copyframeworks-dylibs2frameworks.command
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${DEPENDS_PATH}/share/${APP_NAME_LC}
+            $<TARGET_FILE_DIR:${APP_NAME_LC}>/AppData/AppHome
+    COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_BINARY_DIR}/addons/skin.estuary/media/Textures.xbt
+            $<TARGET_FILE_DIR:${APP_NAME_LC}>/AppData/AppHome/addons/skin.estuary/media/Textures.xbt
+)
+
+add_custom_command(TARGET ${APP_NAME_LC} POST_BUILD
     # visionOS: embed ANGLE frameworks + add rpath (before signing)
     COMMAND "ANGLE_FRAMEWORKS_DIR=${ANGLE_FRAMEWORKS_DIR}"
             ${CMAKE_SOURCE_DIR}/tools/darwin/Support/copyframeworks-visionos.command
@@ -54,4 +78,4 @@ add_custom_command(TARGET ${APP_NAME_LC} POST_BUILD
 
 
 configure_file(${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/Credits.html.in
-               ${CMAKE_BINARY_DIR}/xbmc/platform/darwin/Credits.html @ONLY)
+               ${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/Credits.html @ONLY)
