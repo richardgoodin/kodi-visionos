@@ -8,7 +8,7 @@
 
 #import "platform/darwin/visionos/VisionOSDisplayManager.h"
 
-#include "utils/log.h"
+#include "platform/darwin/visionos/VisionOSLog.h"
 
 @implementation VisionOSDisplayManager
 
@@ -21,7 +21,7 @@
   {
     // UIScreen is unavailable on visionOS; use a fixed logical scale of 2×.
     screenScale = 2.0f;
-    CLog::Log(LOGDEBUG, "VisionOSDisplayManager: screenScale={:.1f}", (float)screenScale);
+    VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSDisplayManager: screenScale={:.1f}", (float)screenScale);
   }
   return self;
 }
@@ -49,8 +49,9 @@
 - (void)displayRateSwitch:(double)refreshRate withDynamicRange:(int)dynamicRange
 {
   // No-op on visionOS – the system compositor controls the display mode.
-  CLog::Log(LOGDEBUG, "VisionOSDisplayManager::displayRateSwitch: requested {:.3f} Hz (no-op)",
-            refreshRate);
+  VISIONOS_SHELL_LOG(LOGDEBUG,
+                     "VisionOSDisplayManager::displayRateSwitch: requested {:.3f} Hz (no-op)",
+                     refreshRate);
 }
 
 @end

@@ -9,7 +9,7 @@
 #import "platform/darwin/visionos/VisionOSGLView.h"
 
 #include "messaging/ApplicationMessenger.h"
-#include "utils/log.h"
+#include "platform/darwin/visionos/VisionOSLog.h"
 
 #import "platform/darwin/visionos/XBMCController.h"
 
@@ -51,7 +51,7 @@
 
     if (![self initEGL])
     {
-      CLog::Log(LOGERROR, "VisionOSGLView: failed to initialise ANGLE EGL");
+      VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: failed to initialise ANGLE EGL");
       return nil;
     }
   }
@@ -64,7 +64,7 @@
   id<MTLDevice> metalDevice = MTLCreateSystemDefaultDevice();
   if (!metalDevice)
   {
-    CLog::Log(LOGERROR, "VisionOSGLView: no Metal device");
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: no Metal device");
     return NO;
   }
 
@@ -78,17 +78,17 @@
                                        displayAttribs);
   if (m_eglDisplay == EGL_NO_DISPLAY)
   {
-    CLog::Log(LOGERROR, "VisionOSGLView: eglGetPlatformDisplay failed");
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglGetPlatformDisplay failed");
     return NO;
   }
 
   EGLint major, minor;
   if (!eglInitialize(m_eglDisplay, &major, &minor))
   {
-    CLog::Log(LOGERROR, "VisionOSGLView: eglInitialize failed");
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglInitialize failed");
     return NO;
   }
-  CLog::Log(LOGINFO, "VisionOSGLView: EGL {}.{} on Metal", major, minor);
+  VISIONOS_SHELL_LOG(LOGINFO, "VisionOSGLView: EGL {}.{} on Metal", major, minor);
 
   // Choose config
   const EGLint configAttribs[] = {
@@ -115,7 +115,7 @@
     if (!eglChooseConfig(m_eglDisplay, fallbackAttribs, &m_eglConfig, 1, &numConfigs) ||
         numConfigs < 1)
     {
-      CLog::Log(LOGERROR, "VisionOSGLView: eglChooseConfig failed");
+      VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglChooseConfig failed");
       return NO;
     }
   }
@@ -131,7 +131,7 @@
   }
   if (m_eglContext == EGL_NO_CONTEXT)
   {
-    CLog::Log(LOGERROR, "VisionOSGLView: eglCreateContext failed");
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglCreateContext failed");
     return NO;
   }
 
@@ -141,21 +141,22 @@
                                         (__bridge EGLNativeWindowType)metalLayer, nullptr);
   if (m_eglSurface == EGL_NO_SURFACE)
   {
-    CLog::Log(LOGERROR, "VisionOSGLView: eglCreateWindowSurface failed (err={})",
-              eglGetError());
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglCreateWindowSurface failed (err={})",
+                       eglGetError());
     return NO;
   }
 
   if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext))
   {
-    CLog::Log(LOGERROR, "VisionOSGLView: eglMakeCurrent failed");
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglMakeCurrent failed");
     return NO;
   }
 
   // Cache framebuffer dimensions
   eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &m_framebufferWidth);
   eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_HEIGHT, &m_framebufferHeight);
-  CLog::Log(LOGINFO, "VisionOSGLView: surface {}x{}", m_framebufferWidth, m_framebufferHeight);
+  VISIONOS_SHELL_LOG(LOGINFO, "VisionOSGLView: surface {}x{}", m_framebufferWidth,
+                     m_framebufferHeight);
 
   return YES;
 }

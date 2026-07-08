@@ -10,6 +10,7 @@ set(SOURCES VisionOSDisplayManager.mm
 set(HEADERS VisionOSDisplayManager.h
             VisionOSGLView.h
             VisionOSKeyboardView.h
+            VisionOSLog.h
             XBMCApplication.h
             XBMCController.h)
 
