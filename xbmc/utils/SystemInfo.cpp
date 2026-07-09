@@ -1459,6 +1459,49 @@ std::string CSysInfo::GetBuildTargetPlatformVersionDecoded(void)
   else
     return StringUtils::Format("version {}.{}", __MAC_OS_X_VERSION_MIN_REQUIRED / 10000,
                                (__MAC_OS_X_VERSION_MIN_REQUIRED / 100) % 100);
+#elif defined(TARGET_DARWIN_VISIONOS)
+  // ---------------------------------------------------------------------------
+  // visionOS build-target version.
+  //
+  // WHY THIS BRANCH EXISTS:
+  //   This branch must appear BEFORE the TARGET_DARWIN_EMBEDDED branch below,
+  //   because the visionOS build defines BOTH TARGET_DARWIN_VISIONOS and
+  //   TARGET_DARWIN_EMBEDDED (see cmake/scripts/visionos/ArchSetup.cmake).
+  //   Without it, visionOS fell into the EMBEDDED branch, which calls
+  //   std::stoi(GetBuildTargetPlatformVersion()). That function has no visionOS
+  //   case in its own #if cascade, so it returned an empty string, and stoi("")
+  //   threw std::invalid_argument("stoi: no conversion"). The throw propagated
+  //   out of CApplication and was swallowed by the catch(...) in
+  //   -[XBMCController runAnimation:], which called exit(0). Net effect: Kodi
+  //   silently quit at startup with no usable diagnostic.
+  //
+  // WHY WE DON'T   // WHY WE DON'T   // WHMIN_REQUIRED MACRO:
+  //   Apple does not ship one. Unlike iOS (__IPHONE_OS_VERSION_MIN_REQUIRED) and
+  //   tvOS (__TV_OS_VERSION_MIN_REQUIRED), the xrOS SDK predefines only
+  //   __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__ (verified with
+  //   `echo | xcrun --sdk xros clang -dM -E -x c -`, which yields 260500 for
+  //   visionOS 26.5, plus TARGET_OS_VISION=1 and nothing else). Defining a
+  //   fake __VISIONOS_* macro ourselves would be worse than using the real one.
+  //
+  // WHY WE FORMAT DIRECTLY INSTEAD OF CALLING GetBuildTargetPlatformVersion():
+  //   That value is display-only. Its sole non-test caller is a log line in
+  //   Application.cpp; nothing branches on it. Round-tripping an integer through
+  //   a string and back via stoi() buys nothing and is what crashed. We format
+  //   the compile-time constant directly, exactly as the TARGET_DARWIN_OSX
+  //   branch above does with __MAC_OS_X_VERSION_MIN_REQUIRED.
+  //   Encoding is MMmmrr: 260500 -> 26.5.0. The leading "version " prefix is
+  //   required by xbmc/utils/test/TestSystemInfo.cpp.
+  //
+  // TO REVERSE:
+  //   Delete this entire #elif block. visionOS will then fall through to the
+  //   TARGET_DARWIN_EMBEDDED branch and crash again at startup unless
+  //   GetBuildTargetPlatformVersion() is also given a TARGET_DARWIN_VISIONOS
+  //   case, or the stoi() calls below are guarded against an empty string.
+  // ---------------------------------------------------------------------------
+  return StringUtils::Format("version {}.{}.{}",
+                             (__ENVIRONMENT_OS_VERSION_MIN_REQUIRED__ / 10000) % 100,
+                             (__ENVIRONMENT_OS_VERSION_MIN_REQUIRED__ / 100) % 100,
+                             __ENVIRONMENT_OS_VERSION_MIN_REQUIRED__ % 100);
 #elif defined(TARGET_DARWIN_EMBEDDED)
   std::string versionStr = GetBuildTargetPlatformVersion();
   static const int major = (std::stoi(versionStr) / 10000) % 100;

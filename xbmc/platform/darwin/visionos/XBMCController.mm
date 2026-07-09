@@ -316,10 +316,16 @@ XBMCController* g_xbmcController;
       const auto appPower = components.GetComponent<CApplicationPowerHandling>();
       appPower->SetRenderGUI(false);
     }
+    catch (const std::exception& e)
+    {
+      m_appAlive = FALSE;
+      CLog::Log(LOGERROR, "{}std::exception caught on main loop: {} (status={}). Exiting",
+                __PRETTY_FUNCTION__, e.what(), status);
+    }
     catch (...)
     {
       m_appAlive = FALSE;
-      CLog::Log(LOGERROR, "{}Exception caught on main loop status={}. Exiting",
+      CLog::Log(LOGERROR, "{}Unknown exception caught on main loop status={}. Exiting",
                 __PRETTY_FUNCTION__, status);
     }
 
