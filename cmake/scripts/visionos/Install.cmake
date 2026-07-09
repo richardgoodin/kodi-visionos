@@ -9,6 +9,18 @@ configure_file(${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/visionos/Kodi.entitlemen
 set_target_properties(${APP_NAME_LC} PROPERTIES
   XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS ${ENTITLEMENTS_OUT_PATH})
 
+# App icon (visionOS layered .solidimagestack)
+# Attach the asset catalog to the target and tell Xcode to run actool on it,
+# producing Assets.car in the bundle. Without this, visionOS shows the default
+# gridded placeholder icon.
+set(VISIONOS_ASSET_CATALOG
+    ${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/visionos/Assets.xcassets)
+target_sources(${APP_NAME_LC} PRIVATE ${VISIONOS_ASSET_CATALOG})
+set_source_files_properties(${VISIONOS_ASSET_CATALOG} PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources)
+set_target_properties(${APP_NAME_LC} PROPERTIES
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon")
+
 # Code signing
 set(DEVELOPMENT_TEAM "" CACHE STRING "Development Team")
 set(CODE_SIGN_IDENTITY
