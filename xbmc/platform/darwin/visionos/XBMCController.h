@@ -26,7 +26,7 @@
 
 class CFileItem;
 
-@interface XBMCController : UIViewController
+@interface XBMCController : UIViewController <UIKeyInput>
 {
   BOOL m_isPlayingBeforeInactive;
   UIBackgroundTaskIdentifier m_enterBackgroundTaskId;

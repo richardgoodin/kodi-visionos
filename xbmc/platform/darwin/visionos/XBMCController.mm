@@ -12,6 +12,7 @@
 #include "FileItem.h"
 #include "ServiceBroker.h"
 #include "application/AppEnvironment.h"
+#include "application/AppInboundProtocol.h"
 #include "application/AppParams.h"
 #include "application/Application.h"
 #include "application/ApplicationComponents.h"
@@ -19,6 +20,7 @@
 #include "cores/AudioEngine/Interfaces/AE.h"
 #include "guilib/GUIComponent.h"
 #include "guilib/GUIWindowManager.h"
+#include "input/keyboard/XBMC_vkeys.h"
 #include "interfaces/AnnouncementManager.h"
 #include "messaging/ApplicationMessenger.h"
 #include "network/Network.h"
@@ -48,6 +50,69 @@ XBMCController* g_xbmcController;
 @synthesize displayManager;
 @synthesize glView;
 
+#pragma mark - Bluetooth keyboard helpers
+
+// Fire a synchronous KEYDOWN + KEYUP pair into Kodi's input pipeline.
+- (void)sendKeypressEvent:(XBMC_Event)event
+{
+  std::shared_ptr<CAppInboundProtocol> appPort = CServiceBroker::GetAppPort();
+  if (appPort)
+  {
+    event.type = XBMC_KEYDOWN;
+    appPort->OnEvent(event);
+    event.type = XBMC_KEYUP;
+    appPort->OnEvent(event);
+  }
+}
+
+// Convenience: send a single named key with no modifier / unicode.
+- (void)sendKey:(XBMCKey)key
+{
+  XBMC_Event evt = {};
+  evt.key.keysym.sym = key;
+  [self sendKeypressEvent:evt];
+}
+
+#pragma mark - UIKeyInput protocol (Bluetooth keyboard text input)
+
+// Return NO so UIKit never shows the software keyboard.
+// The zero-size inputView returned below also suppresses it.
+- (BOOL)hasText
+{
+  return NO;
+}
+
+// Called for every printable character typed on the BT keyboard.
+- (void)insertText:(NSString*)text
+{
+  if (!text.length)
+    return;
+
+  XBMC_Event evt = {};
+  unichar ch = [text characterAtIndex:0];
+
+  // Upper-case letters → send as lower-case with LSHIFT modifier.
+  if (ch >= 'A' && ch <= 'Z')
+  {
+    evt.key.keysym.mod = XBMCKMOD_LSHIFT;
+    ch += 0x20;
+  }
+
+  // Newline / carriage-return → Return key.
+  if (ch == '\n' || ch == '\r')
+    ch = XBMCK_RETURN;
+
+  evt.key.keysym.sym = (XBMCKey)ch;
+  evt.key.keysym.unicode = ch;
+  [self sendKeypressEvent:evt];
+}
+
+// Called when the BT keyboard Backspace key is pressed.
+- (void)deleteBackward
+{
+  [self sendKey:XBMCK_BACKSPACE];
+}
+
 #pragma mark - UIView Keyboard
 
 - (void)activateKeyboard:(UIView*)view
@@ -66,6 +131,92 @@ XBMCController* g_xbmcController;
 - (void)nativeKeyboardActive:(bool)active
 {
   // Not used on visionOS in Stage 1
+}
+
+#pragma mark - UIResponder press events (arrow keys, Esc, Return, etc.)
+
+// Map a UIPress to an XBMCKey for non-printable / navigation keys.
+// Returns XBMCK_UNKNOWN when the key should be handled by insertText: instead.
+static XBMCKey XBMCKeyFromUIPress(UIPress* press)
+{
+  UIKey* key = press.key;
+  if (!key)
+    return XBMCK_UNKNOWN;
+
+  NSString* chars = key.charactersIgnoringModifiers;
+  if (!chars.length)
+    return XBMCK_UNKNOWN;
+
+  // Navigation / special keys exposed as named UIKeyInput constants.
+  if ([chars isEqualToString:UIKeyInputUpArrow])
+    return XBMCK_UP;
+  if ([chars isEqualToString:UIKeyInputDownArrow])
+    return XBMCK_DOWN;
+  if ([chars isEqualToString:UIKeyInputLeftArrow])
+    return XBMCK_LEFT;
+  if ([chars isEqualToString:UIKeyInputRightArrow])
+    return XBMCK_RIGHT;
+  if ([chars isEqualToString:UIKeyInputEscape])
+    return XBMCK_ESCAPE;
+  if ([chars isEqualToString:UIKeyInputPageUp])
+    return XBMCK_PAGEUP;
+  if ([chars isEqualToString:UIKeyInputPageDown])
+    return XBMCK_PAGEDOWN;
+  if ([chars isEqualToString:UIKeyInputHome])
+    return XBMCK_HOME;
+  if ([chars isEqualToString:UIKeyInputEnd])
+    return XBMCK_END;
+
+  // Carriage return / newline → Return.
+  unichar ch = [chars characterAtIndex:0];
+  if (ch == '\r' || ch == '\n')
+    return XBMCK_RETURN;
+  if (ch == '\t')
+    return XBMCK_TAB;
+
+  return XBMCK_UNKNOWN;
+}
+
+- (void)pressesBegan:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event
+{
+  bool handled = false;
+  for (UIPress* press in presses)
+  {
+    XBMCKey xkey = XBMCKeyFromUIPress(press);
+    if (xkey != XBMCK_UNKNOWN)
+    {
+      XBMC_Event evt = {};
+      evt.type = XBMC_KEYDOWN;
+      evt.key.keysym.sym = xkey;
+      std::shared_ptr<CAppInboundProtocol> appPort = CServiceBroker::GetAppPort();
+      if (appPort)
+        appPort->OnEvent(evt);
+      handled = true;
+    }
+  }
+  if (!handled)
+    [super pressesBegan:presses withEvent:event];
+}
+
+- (void)pressesEnded:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event
+{
+  bool handled = false;
+  for (UIPress* press in presses)
+  {
+    XBMCKey xkey = XBMCKeyFromUIPress(press);
+    if (xkey != XBMCK_UNKNOWN)
+    {
+      XBMC_Event evt = {};
+      evt.type = XBMC_KEYUP;
+      evt.key.keysym.sym = xkey;
+      std::shared_ptr<CAppInboundProtocol> appPort = CServiceBroker::GetAppPort();
+      if (appPort)
+        appPort->OnEvent(evt);
+      handled = true;
+    }
+  }
+  if (!handled)
+    [super pressesEnded:presses withEvent:event];
 }
 
 #pragma mark - View
