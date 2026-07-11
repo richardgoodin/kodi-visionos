@@ -263,10 +263,30 @@ bool CWinSystemVisionOS::SetFullScreen(bool fullScreen, RESOLUTION_INFO& res, bo
 
 bool CWinSystemVisionOS::GetScreenResolution(int* w, int* h, double* fps)
 {
+  // Use the actual EGL framebuffer pixel dimensions reported by eglQuerySurface
+  // rather than a hardcoded logical resolution.  This ensures m_width/m_height
+  // in CRenderSystemGLES match the real drawable surface so that
+  // SetScissors' Y-flip (m_height - y2) lands in the correct GL pixel row.
+  VisionOSGLView* glView = g_xbmcController.glView;
+  if (glView && glView.eglSurface != EGL_NO_SURFACE)
+  {
+    EGLint fbW = 0, fbH = 0;
+    eglQuerySurface(glView.eglDisplay, glView.eglSurface, EGL_WIDTH,  &fbW);
+    eglQuerySurface(glView.eglDisplay, glView.eglSurface, EGL_HEIGHT, &fbH);
+    if (fbW > 0 && fbH > 0)
+    {
+      *w = fbW;
+      *h = fbH;
+      *fps = [g_xbmcController.displayManager getDisplayRate];
+      CLog::Log(LOGDEBUG, "visionOS screen: {}x{} @ {} (from EGL surface)", *w, *h, *fps);
+      return true;
+    }
+  }
+  // Fallback to display manager if EGL surface is not yet available.
   *w = [g_xbmcController.displayManager getScreenSize].width;
   *h = [g_xbmcController.displayManager getScreenSize].height;
   *fps = [g_xbmcController.displayManager getDisplayRate];
-  CLog::Log(LOGDEBUG, "visionOS screen: {}x{} @ {}", *w, *h, *fps);
+  CLog::Log(LOGDEBUG, "visionOS screen: {}x{} @ {} (from display manager)", *w, *h, *fps);
   return true;
 }
 
