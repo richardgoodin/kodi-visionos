@@ -69,6 +69,7 @@ public:
 
   bool IsExtSupported(const char* extension) const override;
 
+  bool InitRenderSystem() override;
   bool BeginRender() override;
   bool EndRender() override;
 

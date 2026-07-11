@@ -19,6 +19,10 @@
 #import "platform/darwin/tvos/TVOSSettingsHandler.h"
 #include "windowing/tvos/WinSystemTVOS.h"
 #endif
+#if defined(TARGET_DARWIN_VISIONOS)
+#include "platform/darwin/visionos/powermanagement/VisionOSPowerSyscall.h"
+#include "windowing/visionos/WinSystemVisionOS.h"
+#endif
 // clang-format on
 
 CPlatform* CPlatform::CreateInstance()
@@ -39,6 +43,11 @@ bool CPlatformDarwinEmbedded::InitStageOne()
   CWinSystemTVOS::Register();
 
   CTVOSPowerSyscall::Register();
+#endif
+#if defined(TARGET_DARWIN_VISIONOS)
+  CWinSystemVisionOS::Register();
+
+  CVisionOSPowerSyscall::Register();
 #endif
 
   return true;

@@ -14,7 +14,7 @@ SYNC="rsync -aq --exclude .git* --exclude .DS_Store* --exclude *.dll --exclude *
 SKINSYNC="rsync -aq --exclude .git* --exclude CVS* --exclude .svn* --exclude .cvsignore* --exclude .cvspass* --exclude .DS_Store* --exclude *.dll  --exclude *.DLL --exclude *linux.*  --exclude *.bat"
 
 # rsync command for including everything but the skins
-ADDONSYNC="rsync -aq --no-links --exclude .git* --exclude CVS* --exclude .svn* --exclude .cvsignore* --exclude .cvspass* --exclude .DS_Store* --exclude addons/skin.estuary --exclude addons/lib --exclude addons/share"
+ADDONSYNC="rsync -aq --no-links --exclude *.in --exclude .git* --exclude CVS* --exclude .svn* --exclude .cvsignore* --exclude .cvspass* --exclude .DS_Store* --exclude addons/skin.estuary --exclude addons/lib --exclude addons/share"
 
 # binary name is Kodi but we build Kodi.bin so to get a clean binary each time
 mv $TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/$EXECUTABLE_NAME.bin $TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/$EXECUTABLE_NAME
@@ -31,6 +31,7 @@ ${SYNC} "$SRCROOT/LICENSE.md"  "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppDat
 ${SYNC} "$SRCROOT/privacy-policy.txt"  "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome"
 ${SYNC} "$SRCROOT/xbmc/platform/darwin/Credits.html"  "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/"
 ${ADDONSYNC} "$SRCROOT/addons"  "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome"
+GENADDONS="$TARGET_BUILD_DIR/../../addons"; [ -d "$GENADDONS" ] && ${SYNC} --include='*/' --include='addon.xml' --exclude='*' "$GENADDONS/" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome/addons/"
 ${SYNC} "$SRCROOT/media"    "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome"
 
 # extracted eggs

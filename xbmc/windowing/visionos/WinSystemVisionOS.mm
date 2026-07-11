@@ -202,6 +202,36 @@ bool CWinSystemVisionOS::CreateNewWindow(const std::string& name,
   return true;
 }
 
+bool CWinSystemVisionOS::InitRenderSystem()
+{
+  // UIKit's layoutSubviews can fire between CreateNewWindow() and this call,
+  // unbinding the EGL context (eglMakeCurrent to NULL) while recreating the
+  // surface.  Explicitly rebind here before the base class calls glGetString.
+  VisionOSGLView* glView = g_xbmcController.glView;
+  EGLDisplay disp = glView.eglDisplay;
+  EGLSurface surf = glView.eglSurface;
+  EGLContext ctx  = glView.eglContext;
+
+  CLog::Log(LOGDEBUG, "CWinSystemVisionOS::InitRenderSystem: disp={} surf={} ctx={}",
+            (void*)disp, (void*)surf, (void*)ctx);
+
+  if (ctx != EGL_NO_CONTEXT && surf != EGL_NO_SURFACE)
+  {
+    if (!eglMakeCurrent(disp, surf, surf, ctx))
+      CLog::Log(LOGERROR, "CWinSystemVisionOS::InitRenderSystem: eglMakeCurrent failed err=0x{:x}",
+                static_cast<unsigned>(eglGetError()));
+    else
+      CLog::Log(LOGDEBUG, "CWinSystemVisionOS::InitRenderSystem: eglMakeCurrent OK");
+  }
+  else
+  {
+    CLog::Log(LOGERROR, "CWinSystemVisionOS::InitRenderSystem: EGL context or surface is invalid (ctx={} surf={})",
+              (void*)ctx, (void*)surf);
+  }
+
+  return CRenderSystemGLES::InitRenderSystem();
+}
+
 bool CWinSystemVisionOS::DestroyWindow()
 {
   return true;

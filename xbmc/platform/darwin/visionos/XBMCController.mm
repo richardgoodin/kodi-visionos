@@ -265,6 +265,12 @@ XBMCController* g_xbmcController;
 {
   if (!m_animating && glView.eglContext != EGL_NO_CONTEXT)
   {
+    // Release the EGL context from the main thread so the XBMC_Run background
+    // thread can acquire it via eglMakeCurrent in InitRenderSystem.
+    // If initEGL bound the context on the main thread and we don't release it
+    // here, eglMakeCurrent on the render thread returns EGL_BAD_ACCESS (0x3002).
+    [glView releaseContext];
+
     m_animationThreadLock = [[NSConditionLock alloc] initWithCondition:FALSE];
     m_animationThread = [[NSThread alloc] initWithTarget:self
                                                 selector:@selector(runAnimation:)

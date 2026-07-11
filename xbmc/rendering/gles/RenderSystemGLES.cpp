@@ -52,6 +52,7 @@ bool CRenderSystemGLES::InitRenderSystem()
   m_RenderVersionMinor = 0;
 
   const char* ver = (const char*)glGetString(GL_VERSION);
+  CLog::Log(LOGDEBUG, "GLES: glGetString(GL_VERSION) = {}", ver ? ver : "<NULL>");
   if (ver != NULL)
   {
     sscanf(ver, "%d.%d", &m_RenderVersionMajor, &m_RenderVersionMinor);
@@ -59,6 +60,7 @@ bool CRenderSystemGLES::InitRenderSystem()
       sscanf(ver, "%*s %*s %d.%d", &m_RenderVersionMajor, &m_RenderVersionMinor);
     m_RenderVersion = ver;
   }
+  CLog::Log(LOGDEBUG, "GLES: parsed version major={} minor={}", m_RenderVersionMajor, m_RenderVersionMinor);
 
   // Get our driver vendor and renderer
   const char *tmpVendor = (const char*) glGetString(GL_VENDOR);

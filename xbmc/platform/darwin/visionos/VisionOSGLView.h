@@ -33,8 +33,12 @@
 
 @property(readonly) EGLContext eglContext;
 @property(readonly) EGLDisplay eglDisplay;
+@property(readonly) EGLSurface eglSurface;
 
 - (instancetype)initWithFrame:(CGRect)frame;
+
+// Detach the EGL context from the current thread so a background thread can take ownership
+- (void)releaseContext;
 
 // Called before each Kodi render frame
 - (void)setFramebuffer;

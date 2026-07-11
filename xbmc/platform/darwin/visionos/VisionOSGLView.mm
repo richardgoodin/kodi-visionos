@@ -29,6 +29,7 @@
 
 @synthesize eglContext = m_eglContext;
 @synthesize eglDisplay = m_eglDisplay;
+@synthesize eglSurface = m_eglSurface;
 
 // visionOS uses CAMetalLayer as the backing layer for ANGLE
 + (Class)layerClass
@@ -146,17 +147,16 @@
     return NO;
   }
 
-  if (!eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext))
-  {
-    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglMakeCurrent failed");
-    return NO;
-  }
-
-  // Cache framebuffer dimensions
+  // Cache framebuffer dimensions (surface query does not require the context to be current)
   eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &m_framebufferWidth);
   eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_HEIGHT, &m_framebufferHeight);
   VISIONOS_SHELL_LOG(LOGINFO, "VisionOSGLView: surface {}x{}", m_framebufferWidth,
                      m_framebufferHeight);
+
+  // Do NOT call eglMakeCurrent here.  The context must be first bound on the
+  // XBMC_Run background thread (not the UIKit main thread), otherwise the render
+  // thread's eglMakeCurrent call returns EGL_BAD_ACCESS (0x3002).
+  // setFramebuffer is the authoritative place that binds the context.
 
   return YES;
 }
@@ -174,11 +174,26 @@
   }
 }
 
+- (void)releaseContext
+{
+  // Detach the EGL context from the current thread so a background render
+  // thread can acquire it via eglMakeCurrent.  Must be called on the main
+  // thread before startAnimation spins up the XBMC_Run NSThread.
+  if (m_eglDisplay != EGL_NO_DISPLAY)
+    eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+}
+
 - (void)setFramebuffer
 {
   if (m_eglContext != EGL_NO_CONTEXT)
   {
-    if (eglGetCurrentContext() != m_eglContext)
+    // Rebind if the context is not current OR if the draw surface has changed
+    // (e.g. layoutSubviews recreated m_eglSurface while we were rendering to
+    // the old one).  Without the surface check, the render thread keeps drawing
+    // to the destroyed surface while presentFramebuffer swaps a blank new one,
+    // producing a partial / missing-items frame.
+    if (eglGetCurrentContext() != m_eglContext ||
+        eglGetCurrentSurface(EGL_DRAW) != m_eglSurface)
       eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0); // ANGLE default framebuffer
@@ -205,9 +220,14 @@
 {
   [super layoutSubviews];
 
-  // Recreate the EGL surface when the view resizes
+  // Recreate the EGL surface when the view resizes.
+  // Do NOT call eglMakeCurrent here — the context is owned by the XBMC_Run
+  // render thread.  Only recreate the surface object; setFramebuffer will
+  // rebind it on the render thread on the next frame.
   if (m_eglDisplay != EGL_NO_DISPLAY && m_eglSurface != EGL_NO_SURFACE)
   {
+    // Detach whatever is current (may be nothing, may be the render thread's
+    // binding — the render thread will rebind via setFramebuffer next frame).
     eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroySurface(m_eglDisplay, m_eglSurface);
     m_eglSurface = EGL_NO_SURFACE;
@@ -218,7 +238,7 @@
                                           nullptr);
     if (m_eglSurface != EGL_NO_SURFACE)
     {
-      eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext);
+      // Update cached dimensions without touching context ownership.
       eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &m_framebufferWidth);
       eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_HEIGHT, &m_framebufferHeight);
     }
