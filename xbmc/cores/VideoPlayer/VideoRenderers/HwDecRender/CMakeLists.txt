@@ -44,6 +44,11 @@ if(CORE_SYSTEM_NAME STREQUAL darwin_embedded AND NOT "visionos" IN_LIST CORE_PLA
   endif()
 endif()
 
+if(CORE_SYSTEM_NAME STREQUAL visionos)
+  list(APPEND SOURCES RendererVTBVisionOS.cpp)
+  list(APPEND HEADERS RendererVTBVisionOS.h)
+endif()
+
 if(CORE_SYSTEM_NAME STREQUAL android)
   list(APPEND SOURCES RendererMediaCodec.cpp
                       RendererMediaCodecSurface.cpp)

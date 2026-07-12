@@ -50,7 +50,7 @@ list(APPEND DEPLIBS "-framework CoreFoundation" "-framework CoreVideo"
                     "-framework CoreMedia" "-framework AVFoundation"
                     "-framework VideoToolbox" "-lresolv" "-ObjC"
                     "-framework AVKit" "-framework GameController"
-                    "-framework Metal")
+                    "-framework Metal" "-framework IOSurface")
 
 # visionOS SDK identifier is "xros"
 set(CMAKE_OSX_SYSROOT xros)

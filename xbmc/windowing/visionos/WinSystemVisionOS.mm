@@ -23,6 +23,7 @@
 #include "cores/VideoPlayer/Process/ios/ProcessInfoIOS.h"
 // RendererVTBGLES is excluded from the visionOS build (CVOpenGLESTextureCache
 // and the native GLES sync APIs are unavailable on visionOS).
+#include "cores/VideoPlayer/VideoRenderers/HwDecRender/RendererVTBVisionOS.h"
 #include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
 
 // ANGLE GLES headers — glGetString and friends come from ANGLE, not the
@@ -194,7 +195,7 @@ bool CWinSystemVisionOS::CreateNewWindow(const std::string& name,
   VTB::CDecoder::Register();
   VIDEOPLAYER::CRendererFactory::ClearRenderer();
   CLinuxRendererGLES::Register();
-  // CRendererVTB not available on visionOS (CVOpenGLESTextureCache unavailable).
+  CRendererVTBVisionOS::Register();
   VIDEOPLAYER::CProcessInfoIOS::Register();
   RETRO::CRPProcessInfoIOS::Register();
   RETRO::CRPProcessInfoIOS::RegisterRendererFactory(new RETRO::CRendererFactoryOpenGLES);

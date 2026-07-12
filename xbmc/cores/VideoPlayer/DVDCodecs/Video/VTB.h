@@ -10,6 +10,8 @@
 
 #ifdef HAS_GL
 #include <OpenGL/gl.h>
+#elif defined(TARGET_DARWIN_VISIONOS)
+#include "system_gl.h"
 #else
 #include <OpenGLES/ES2/gl.h>
 #endif
