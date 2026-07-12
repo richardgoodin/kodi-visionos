@@ -33,6 +33,10 @@ ${SYNC} "$SRCROOT/xbmc/platform/darwin/Credits.html"  "$TARGET_BUILD_DIR/$EXECUT
 ${ADDONSYNC} "$SRCROOT/addons"  "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome"
 GENADDONS="$TARGET_BUILD_DIR/../../addons"; [ -d "$GENADDONS" ] && ${SYNC} --include='*/' --include='addon.xml' --exclude='*' "$GENADDONS/" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome/addons/"
 [ -d "$GENADDONS" ] && for a in "$GENADDONS"/*/; do if ls "$a"*.dylib >/dev/null 2>&1; then ${SYNC} "$a" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome/addons/$(basename "$a")/"; fi; done
+
+  # code-sign every staged binary-addon dylib (visionOS refuses to dlopen unsigned code)
+  SIGNID="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+  find "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome/addons" -type f -name '*.dylib' -exec codesign --force --sign "$SIGNID" {} +
 ${SYNC} "$SRCROOT/media"    "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/AppData/AppHome"
 
 # extracted eggs

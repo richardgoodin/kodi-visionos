@@ -875,6 +875,9 @@ bool CAddonInfoBuilder::PlatformSupportsAddon(const AddonInfoPtr& addon)
 #elif defined(TARGET_DARWIN_TVOS)
     "tvos",
     "tvos-aarch64",
+#elif defined(TARGET_DARWIN_VISIONOS)
+    "visionos",
+    "visionos-aarch64",
 #endif
 #elif defined(TARGET_DARWIN_OSX)
     "osx",
