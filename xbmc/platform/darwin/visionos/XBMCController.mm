@@ -90,6 +90,7 @@ XBMCController* g_xbmcController;
 
   XBMC_Event evt = {};
   unichar ch = [text characterAtIndex:0];
+  unichar uni = ch;
 
   // Upper-case letters → send as lower-case with LSHIFT modifier.
   if (ch >= 'A' && ch <= 'Z')
@@ -100,10 +101,13 @@ XBMCController* g_xbmcController;
 
   // Newline / carriage-return → Return key.
   if (ch == '\n' || ch == '\r')
+  {
     ch = XBMCK_RETURN;
+    uni = XBMCK_RETURN;
+  }
 
   evt.key.keysym.sym = (XBMCKey)ch;
-  evt.key.keysym.unicode = ch;
+  evt.key.keysym.unicode = uni;
   [self sendKeypressEvent:evt];
 }
 
