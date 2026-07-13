@@ -81,6 +81,8 @@ add_custom_command(TARGET ${APP_NAME_LC} POST_BUILD
 add_custom_command(TARGET ${APP_NAME_LC} POST_BUILD
     # visionOS: embed ANGLE frameworks + add rpath (before signing)
     COMMAND "ANGLE_FRAMEWORKS_DIR=${ANGLE_FRAMEWORKS_DIR}"
+            "CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            "PYTHON_VERSION=${PYTHON_VERSION}"
             ${CMAKE_SOURCE_DIR}/tools/darwin/Support/copyframeworks-visionos.command
     # visionOS: embed provisioning profile + genuine re-sign (installs on device)
     COMMAND "CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"

@@ -30,3 +30,15 @@ if ! otool -l "${EXE}" | grep -q "@executable_path/Frameworks"; then
   echo "Adding rpath @executable_path/Frameworks"
   install_name_tool -add_rpath @executable_path/Frameworks "${EXE}"
 fi
+
+# visionOS: stage a pure-Python _scproxy stub into the app's Python stdlib.
+# The real _scproxy C ext is macOS-only and isn't built for xrOS, but urllib
+# (and add-ons that import it directly) expect it. The stub returns "no proxy",
+# which is correct on-device. Only stage when no real _scproxy*.so is present.
+PYLIB="${APP}/Frameworks/lib/python${PYTHON_VERSION}"
+if [ -d "${PYLIB}" ] \
+   && ! ls "${PYLIB}"/lib-dynload/_scproxy*.so >/dev/null 2>&1 \
+   && ! ls "${PYLIB}"/_scproxy*.so >/dev/null 2>&1; then
+  echo "Staging _scproxy stub into ${PYLIB}"
+  cp "${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/visionos/_scproxy.py" "${PYLIB}/_scproxy.py"
+fi
