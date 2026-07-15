@@ -61,6 +61,18 @@
   self.window = [[UIWindow alloc] init];
   self.window.rootViewController = [XBMCController new];
   [self.window makeKeyAndVisible];
+  if (@available(visionOS 1.0, *))
+  {
+    UIWindowScene* ws = self.window.windowScene;
+    if (ws)
+    {
+      UIWindowSceneGeometryPreferencesVision* geo =
+          [[UIWindowSceneGeometryPreferencesVision alloc] init];
+      geo.size = CGSizeMake(1920, 1080);
+      geo.resizingRestrictions = UIWindowSceneResizingRestrictionsUniform;
+      [ws requestGeometryUpdateWithPreferences:geo errorHandler:nil];
+    }
+  }
   [self.xbmcController startAnimation];
 
   // Audio session

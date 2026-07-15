@@ -229,12 +229,24 @@ static XBMCKey XBMCKeyFromUIPress(UIPress* press)
 {
   [super viewDidLoad];
 
-  glView = [[VisionOSGLView alloc] initWithFrame:self.view.bounds];
+  glView = [[VisionOSGLView alloc] initWithFrame:CGRectMake(0, 0, 1920, 1080)];
 
   displayManager.screenScale = [glView getScreenScale];
 
   self.view.backgroundColor = UIColor.blackColor;
   [self.view addSubview:glView];
+}
+
+- (void)viewDidLayoutSubviews
+{
+  [super viewDidLayoutSubviews];
+  CGSize fixed = glView.bounds.size;
+  CGSize avail = self.view.bounds.size;
+  if (fixed.width <= 0 || fixed.height <= 0)
+    return;
+  CGFloat s = MIN(avail.width / fixed.width, avail.height / fixed.height);
+  glView.transform = CGAffineTransformMakeScale(s, s);
+  glView.center = CGPointMake(avail.width / 2.0, avail.height / 2.0);
 }
 
 - (void)viewWillAppear:(BOOL)animated
