@@ -20,6 +20,9 @@
 // ANGLE EGL types used in the interface below.
 #include <EGL/egl.h>
 
+// Key sym type for sendKey: below.
+#include "input/keyboard/XBMC_keysym.h"
+
 @class VisionOSDisplayManager;
 @class VisionOSGLView;
 @class DarwinEmbedNowPlayingInfoManager;
@@ -44,6 +47,10 @@ class CFileItem;
 @property(nonatomic, strong) VisionOSDisplayManager* displayManager;
 @property(nonatomic, strong) VisionOSGLView* glView;
 
+- (void)sendKey:(XBMCKey)key;
+- (void)sendKeyDown:(XBMCKey)key;
+- (void)sendKeyUp:(XBMCKey)key;
+- (void)sendKeyWithUnicode:(XBMCKey)key;
 - (void)pauseAnimation;
 - (void)resumeAnimation;
 - (void)startAnimation;

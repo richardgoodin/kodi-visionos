@@ -73,6 +73,41 @@ XBMCController* g_xbmcController;
   [self sendKeypressEvent:evt];
 }
 
+// Send a KEYDOWN only — caller must pair it with sendKeyUp:.
+- (void)sendKeyDown:(XBMCKey)key
+{
+  std::shared_ptr<CAppInboundProtocol> appPort = CServiceBroker::GetAppPort();
+  if (appPort)
+  {
+    XBMC_Event evt = {};
+    evt.type = XBMC_KEYDOWN;
+    evt.key.keysym.sym = key;
+    appPort->OnEvent(evt);
+  }
+}
+
+// Send a KEYUP only.
+- (void)sendKeyUp:(XBMCKey)key
+{
+  std::shared_ptr<CAppInboundProtocol> appPort = CServiceBroker::GetAppPort();
+  if (appPort)
+  {
+    XBMC_Event evt = {};
+    evt.type = XBMC_KEYUP;
+    evt.key.keysym.sym = key;
+    appPort->OnEvent(evt);
+  }
+}
+
+// Send a key with both sym and unicode set — letter keys need unicode.
+- (void)sendKeyWithUnicode:(XBMCKey)key
+{
+  XBMC_Event evt = {};
+  evt.key.keysym.sym = key;
+  evt.key.keysym.unicode = (uint16_t)key;
+  [self sendKeypressEvent:evt];
+}
+
 #pragma mark - UIKeyInput protocol (Bluetooth keyboard text input)
 
 // Return NO so UIKit never shows the software keyboard.

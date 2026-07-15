@@ -25,6 +25,16 @@
 #define EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE 0x3489
 #endif
 
+@interface VisionOSGLView ()
+@property(nonatomic, strong) NSTimer* gazeHoldTimer;
+@property(nonatomic, strong) NSTimer* gazeArmTimer;
+@property(nonatomic, assign) CGPoint gazeStart;
+@property(nonatomic, assign) BOOL gazeIsDrag;
+@property(nonatomic, assign) BOOL gazeEnterDown;
+@property(nonatomic, strong) NSTimer* gazeTapTimer;
+@property(nonatomic, assign) NSInteger gazeTapCount;
+@end
+
 @implementation VisionOSGLView
 
 @synthesize eglContext = m_eglContext;
@@ -46,6 +56,11 @@
 
     CAMetalLayer* metalLayer = static_cast<CAMetalLayer*>(self.layer);
     metalLayer.contentsScale = scale;
+    self.userInteractionEnabled = YES;
+    UILongPressGestureRecognizer* press = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(gazePressed:)];
+    press.minimumPressDuration = 0.0;
+    [self addGestureRecognizer:press];
+    NSLog(@"VISIONOS-GAZE probe installed (no hoverStyle)");
     metalLayer.opaque = YES;
     metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     // VISIONOS_STAGE2: framebufferOnly=NO enables readbacks needed for some effects
@@ -214,6 +229,93 @@
 {
   // UIScreen is unavailable on visionOS; use a fixed logical scale of 2×.
   return 2.0f;
+}
+
+- (void)gazeTapFired:(NSTimer*)t
+{
+  self.gazeTapTimer = nil;
+  NSInteger n = self.gazeTapCount;
+  self.gazeTapCount = 0;
+  XBMCKey k = (n == 1) ? XBMCK_RETURN : (n == 2) ? XBMCK_ESCAPE : XBMCK_x;
+  NSLog(@"VISIONOS-GAZE taps=%ld key=%d", (long)n, (int)k);
+  [g_xbmcController sendKeyWithUnicode:k];
+}
+
+- (void)gazeArmFired:(NSTimer*)t
+{
+  self.gazeArmTimer = nil;
+  self.gazeEnterDown = YES;
+  NSLog(@"VISIONOS-GAZE arm: enter down");
+  [g_xbmcController sendKeyDown:XBMCK_RETURN];
+  self.gazeHoldTimer = [NSTimer scheduledTimerWithTimeInterval:0.26 target:self selector:@selector(gazeHoldFired:) userInfo:nil repeats:NO];
+}
+
+- (void)gazeHoldFired:(NSTimer*)t
+{
+  NSLog(@"VISIONOS-GAZE hold repeat");
+  [g_xbmcController sendKeyDown:XBMCK_RETURN];
+}
+
+- (void)gazeDragChanged:(CGPoint)p
+{
+  if (self.gazeIsDrag || self.gazeEnterDown)
+    return;
+  CGFloat dx = p.x - self.gazeStart.x;
+  CGFloat dy = p.y - self.gazeStart.y;
+  CGFloat ax = fabs(dx), ay = fabs(dy);
+  if (ax < 40.0 && ay < 40.0)
+    return;
+  [self.gazeArmTimer invalidate];
+  self.gazeArmTimer = nil;
+  self.gazeIsDrag = YES;
+  CGFloat hi = fmax(ax, ay), lo = fmin(ax, ay);
+  if (lo / hi >= 0.5)
+  {
+    NSLog(@"VISIONOS-GAZE drag indeterminate dx=%.1f dy=%.1f", dx, dy);
+    return;
+  }
+  XBMCKey k = (ax > ay) ? (dx > 0 ? XBMCK_RIGHT : XBMCK_LEFT)
+                        : (dy > 0 ? XBMCK_DOWN : XBMCK_UP);
+  NSLog(@"VISIONOS-GAZE drag dx=%.1f dy=%.1f key=%d", dx, dy, (int)k);
+  [g_xbmcController sendKey:k];
+}
+
+- (void)gazePressed:(UILongPressGestureRecognizer*)g
+{
+  CGPoint p = [g locationInView:self];
+  if (g.state == UIGestureRecognizerStateBegan)
+  {
+    NSLog(@"VISIONOS-GAZE down x=%.1f y=%.1f", p.x, p.y);
+    self.gazeStart = p;
+    self.gazeIsDrag = NO;
+    self.gazeEnterDown = NO;
+    self.gazeArmTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(gazeArmFired:) userInfo:nil repeats:NO];
+  }
+  else if (g.state == UIGestureRecognizerStateChanged)
+  {
+    [self gazeDragChanged:p];
+  }
+  else if (g.state == UIGestureRecognizerStateEnded ||
+           g.state == UIGestureRecognizerStateCancelled)
+  {
+    [self.gazeHoldTimer invalidate];
+    self.gazeHoldTimer = nil;
+    NSLog(@"VISIONOS-GAZE up x=%.1f y=%.1f", p.x, p.y);
+    [self.gazeArmTimer invalidate];
+    self.gazeArmTimer = nil;
+    if (self.gazeEnterDown)
+    {
+      self.gazeEnterDown = NO;
+      [g_xbmcController sendKeyUp:XBMCK_RETURN];
+    }
+    else if (!self.gazeIsDrag)
+    {
+      NSLog(@"VISIONOS-GAZE quick pinch");
+      self.gazeTapCount++;
+      [self.gazeTapTimer invalidate];
+      self.gazeTapTimer = [NSTimer scheduledTimerWithTimeInterval:0.9 target:self selector:@selector(gazeTapFired:) userInfo:nil repeats:NO];
+    }
+  }
 }
 
 - (void)layoutSubviews
