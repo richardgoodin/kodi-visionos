@@ -50,6 +50,15 @@ XBMCController* g_xbmcController;
 @synthesize displayManager;
 @synthesize glView;
 
+#pragma mark - Window appearance
+
+// visionOS: hide the glass container so the root window renders without the
+// system panel background and its rounded corners.
+- (UIContainerBackgroundStyle)preferredContainerBackgroundStyle
+{
+  return UIContainerBackgroundStyleHidden;
+}
+
 #pragma mark - Bluetooth keyboard helpers
 
 // Fire a synchronous KEYDOWN + KEYUP pair into Kodi's input pipeline.
