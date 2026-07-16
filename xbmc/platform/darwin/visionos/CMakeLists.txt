@@ -7,7 +7,8 @@ set(SOURCES VisionOSDisplayManager.mm
             VisionOSKeyboardView.mm
             XBMCController.mm)
 
-set(HEADERS VisionOSDisplayManager.h
+set(HEADERS VisionOSDesktop.h
+            VisionOSDisplayManager.h
             VisionOSGLView.h
             VisionOSKeyboardView.h
             VisionOSLog.h

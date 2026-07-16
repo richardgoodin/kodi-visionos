@@ -9,6 +9,7 @@
 #import "platform/darwin/visionos/XBMCApplication.h"
 
 #import "platform/darwin/NSLogDebugHelpers.h"
+#import "platform/darwin/visionos/VisionOSDesktop.h"
 #import "platform/darwin/visionos/XBMCController.h"
 
 #import <AVFoundation/AVFoundation.h>
@@ -68,7 +69,7 @@
     {
       UIWindowSceneGeometryPreferencesVision* geo =
           [[UIWindowSceneGeometryPreferencesVision alloc] init];
-      geo.size = CGSizeMake(1920, 1080);
+      geo.size = CGSizeMake(VISIONOS_DESKTOP_WIDTH, VISIONOS_DESKTOP_HEIGHT);
       geo.resizingRestrictions = UIWindowSceneResizingRestrictionsUniform;
       [ws requestGeometryUpdateWithPreferences:geo errorHandler:nil];
     }

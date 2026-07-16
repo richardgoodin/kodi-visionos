@@ -35,6 +35,7 @@
 
 #import "platform/darwin/ios-common/AnnounceReceiver.h"
 #import "platform/darwin/ios-common/DarwinEmbedNowPlayingInfoManager.h"
+#import "platform/darwin/visionos/VisionOSDesktop.h"
 #import "platform/darwin/visionos/VisionOSDisplayManager.h"
 #import "platform/darwin/visionos/VisionOSGLView.h"
 #import "platform/darwin/visionos/XBMCApplication.h"
@@ -273,7 +274,7 @@ static XBMCKey XBMCKeyFromUIPress(UIPress* press)
 {
   [super viewDidLoad];
 
-  glView = [[VisionOSGLView alloc] initWithFrame:CGRectMake(0, 0, 1920, 1080)];
+  glView = [[VisionOSGLView alloc] initWithFrame:CGRectMake(0, 0, VISIONOS_DESKTOP_WIDTH, VISIONOS_DESKTOP_HEIGHT)];
 
   displayManager.screenScale = [glView getScreenScale];
 

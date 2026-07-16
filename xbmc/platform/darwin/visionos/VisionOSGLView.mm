@@ -11,6 +11,7 @@
 #include "messaging/ApplicationMessenger.h"
 #include "platform/darwin/visionos/VisionOSLog.h"
 
+#import "platform/darwin/visionos/VisionOSDesktop.h"
 #import "platform/darwin/visionos/XBMCController.h"
 
 #import <QuartzCore/CAMetalLayer.h>
@@ -24,6 +25,31 @@
 #define EGL_ANGLE_platform_angle_metal 1
 #define EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE 0x3489
 #endif
+
+namespace
+{
+// Gaze/pinch tuning. See README_visionos.md for the reasoning.
+
+// A pinch must be held this long, without movement, before it counts as a
+// press. Enter is not sent until it expires, so a drag can still cancel it.
+constexpr NSTimeInterval GAZE_ARM_DELAY = 0.25;
+
+// Delay after arming before a second KEYDOWN is sent. Must EXCEED Kodi
+// KEYBOARD::KEY_HOLD_TRESHOLD (250ms), or CKeyboardStat::TranslateKey never
+// sets MODIFIER_LONG and the longpress action in the keymap cannot fire.
+constexpr NSTimeInterval GAZE_HOLD_REPEAT_DELAY = 0.26;
+
+// Minimum travel, in fixed-desktop points, before a pinch counts as a drag.
+constexpr CGFloat GAZE_DRAG_THRESHOLD = 40.0;
+
+// Minor/major axis ratio above which a drag is too diagonal to resolve.
+// 0.5 is +/- 27 degrees from an axis.
+constexpr CGFloat GAZE_DIAGONAL_LIMIT = 0.5;
+
+// Distance from the left edge, in fixed-desktop points, within which a drag
+// resolving Right is treated as Back instead.
+constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
+} // namespace
 
 @interface VisionOSGLView ()
 @property(nonatomic, strong) NSTimer* gazeHoldTimer;
@@ -58,7 +84,7 @@
     UILongPressGestureRecognizer* press = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(gazePressed:)];
     press.minimumPressDuration = 0.0;
     [self addGestureRecognizer:press];
-    NSLog(@"VISIONOS-GAZE probe installed (no hoverStyle)");
+    VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze recognizer installed");
     metalLayer.opaque = YES;
     metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
     // VISIONOS_STAGE2: framebufferOnly=NO enables readbacks needed for some effects
@@ -226,7 +252,7 @@
 - (CGFloat)getScreenScale
 {
   // UIScreen is unavailable on visionOS; use a fixed logical scale of 2×.
-  return 2.0f;
+  return VISIONOS_DESKTOP_SCALE;
 }
 
 
@@ -234,14 +260,14 @@
 {
   self.gazeArmTimer = nil;
   self.gazeEnterDown = YES;
-  NSLog(@"VISIONOS-GAZE arm: enter down");
+  VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze press armed, Enter down");
   [g_xbmcController sendKeyDown:XBMCK_RETURN];
-  self.gazeHoldTimer = [NSTimer scheduledTimerWithTimeInterval:0.26 target:self selector:@selector(gazeHoldFired:) userInfo:nil repeats:NO];
+  self.gazeHoldTimer = [NSTimer scheduledTimerWithTimeInterval:GAZE_HOLD_REPEAT_DELAY target:self selector:@selector(gazeHoldFired:) userInfo:nil repeats:NO];
 }
 
 - (void)gazeHoldFired:(NSTimer*)t
 {
-  NSLog(@"VISIONOS-GAZE hold repeat");
+  VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze hold threshold, repeat Enter down");
   [g_xbmcController sendKeyDown:XBMCK_RETURN];
 }
 
@@ -251,12 +277,12 @@
     return;
   CGFloat dx = p.x - self.gazeStart.x;
   CGFloat dy = p.y - self.gazeStart.y;
-  if (fabs(dx) < 40.0 && fabs(dy) < 40.0)
+  if (fabs(dx) < GAZE_DRAG_THRESHOLD && fabs(dy) < GAZE_DRAG_THRESHOLD)
     return;
   [self.gazeArmTimer invalidate];
   self.gazeArmTimer = nil;
   self.gazeIsDrag = YES;
-  NSLog(@"VISIONOS-GAZE drag started");
+  VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze drag started");
 }
 
 - (void)gazeDragEnded:(CGPoint)p
@@ -265,16 +291,16 @@
   CGFloat dy = p.y - self.gazeStart.y;
   CGFloat ax = fabs(dx), ay = fabs(dy);
   CGFloat hi = fmax(ax, ay), lo = fmin(ax, ay);
-  if (hi <= 0.0 || lo / hi >= 0.5)
+  if (hi <= 0.0 || lo / hi >= GAZE_DIAGONAL_LIMIT)
   {
-    NSLog(@"VISIONOS-GAZE drag indeterminate dx=%.1f dy=%.1f", dx, dy);
+    VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze drag indeterminate dx={:.1f} dy={:.1f}", dx, dy);
     return;
   }
   XBMCKey k = (ax > ay) ? (dx > 0 ? XBMCK_RIGHT : XBMCK_LEFT)
                         : (dy > 0 ? XBMCK_DOWN : XBMCK_UP);
-  if (k == XBMCK_RIGHT && self.gazeStart.x < 60.0)
+  if (k == XBMCK_RIGHT && self.gazeStart.x < GAZE_EDGE_MARGIN)
     k = XBMCK_ESCAPE;
-  NSLog(@"VISIONOS-GAZE drag dx=%.1f dy=%.1f startx=%.1f key=%d", dx, dy, self.gazeStart.x, (int)k);
+  VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze drag dx={:.1f} dy={:.1f} startx={:.1f} key={}", dx, dy, self.gazeStart.x, (int)k);
   [g_xbmcController sendKey:k];
 }
 
@@ -283,11 +309,11 @@
   CGPoint p = [g locationInView:self];
   if (g.state == UIGestureRecognizerStateBegan)
   {
-    NSLog(@"VISIONOS-GAZE down x=%.1f y=%.1f", p.x, p.y);
+    VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze down x={:.1f} y={:.1f}", p.x, p.y);
     self.gazeStart = p;
     self.gazeIsDrag = NO;
     self.gazeEnterDown = NO;
-    self.gazeArmTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(gazeArmFired:) userInfo:nil repeats:NO];
+    self.gazeArmTimer = [NSTimer scheduledTimerWithTimeInterval:GAZE_ARM_DELAY target:self selector:@selector(gazeArmFired:) userInfo:nil repeats:NO];
   }
   else if (g.state == UIGestureRecognizerStateChanged)
   {
@@ -298,7 +324,7 @@
   {
     [self.gazeHoldTimer invalidate];
     self.gazeHoldTimer = nil;
-    NSLog(@"VISIONOS-GAZE up x=%.1f y=%.1f", p.x, p.y);
+    VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze up x={:.1f} y={:.1f}", p.x, p.y);
     [self.gazeArmTimer invalidate];
     self.gazeArmTimer = nil;
     if (self.gazeEnterDown)
@@ -308,7 +334,7 @@
     }
     else if (!self.gazeIsDrag)
     {
-      NSLog(@"VISIONOS-GAZE quick pinch");
+      VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze quick pinch, Enter");
       [g_xbmcController sendKeyWithUnicode:XBMCK_RETURN];
     }
     else

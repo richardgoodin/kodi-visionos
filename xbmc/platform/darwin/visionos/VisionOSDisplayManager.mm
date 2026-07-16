@@ -6,6 +6,7 @@
  *  See LICENSES/README.md for more information.
  */
 
+#import "platform/darwin/visionos/VisionOSDesktop.h"
 #import "platform/darwin/visionos/VisionOSDisplayManager.h"
 
 #include "platform/darwin/visionos/VisionOSLog.h"
@@ -20,7 +21,7 @@
   if (self)
   {
     // UIScreen is unavailable on visionOS; use a fixed logical scale of 2×.
-    screenScale = 2.0f;
+    screenScale = VISIONOS_DESKTOP_SCALE;
     VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSDisplayManager: screenScale={:.1f}", (float)screenScale);
   }
   return self;
@@ -28,10 +29,10 @@
 
 - (CGSize)getScreenSize
 {
-  // UIScreen is unavailable on visionOS.  Return a fixed virtual canvas size
-  // that matches the Vision Pro's 1:1 pixel-layout for 2D windows.
-  // VISIONOS_STAGE2: query UIWindowScene.effectiveGeometry for the actual frame.
-  CGRect bounds = CGRectMake(0, 0, 1920, 1080);
+  // The desktop is FIXED by design: Kodi renders one 1920x1080 canvas and the
+  // compositor scales it to the window.  This is the ONLY size Kodi ever sees
+  // -- do NOT query real window geometry here.  See VisionOSDesktop.h.
+  CGRect bounds = CGRectMake(0, 0, VISIONOS_DESKTOP_WIDTH, VISIONOS_DESKTOP_HEIGHT);
   CGSize pixelSize;
   pixelSize.width = bounds.size.width * screenScale;
   pixelSize.height = bounds.size.height * screenScale;
@@ -42,7 +43,7 @@
 {
   // visionOS targets 90 Hz.  CADisplayLink will give us the actual rate at
   // runtime; this default is used during initialisation.
-  // VISIONOS_STAGE2: query UIWindowScene.effectiveGeometry for actual rate
+  // VISIONOS_STAGE2: wire up CADisplayLink and report the measured rate.
   return 90.0;
 }
 

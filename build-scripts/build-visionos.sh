@@ -292,7 +292,7 @@ else
     -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/install" \
     -DCORE_SYSTEM_NAME=visionos \
     -DADDONS_TO_BUILD="pvr.mythtv" \
-    -DADDON_SRC_PREFIX=/Users/goodin/code \
+    -DADDON_SRC_PREFIX="$(dirname "$KODI_DIR")" \
     -DENABLE_XCODE_ADDONBUILD=ON \
     -DANGLE_INCLUDE_DIR="$ANGLE_INSTALL/include" \
     -DANGLE_FRAMEWORKS_DIR="$ANGLE_FRAMEWORKS_DIR" \
