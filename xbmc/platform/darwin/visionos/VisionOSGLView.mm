@@ -31,8 +31,6 @@
 @property(nonatomic, assign) CGPoint gazeStart;
 @property(nonatomic, assign) BOOL gazeIsDrag;
 @property(nonatomic, assign) BOOL gazeEnterDown;
-@property(nonatomic, strong) NSTimer* gazeTapTimer;
-@property(nonatomic, assign) NSInteger gazeTapCount;
 @end
 
 @implementation VisionOSGLView
@@ -231,15 +229,6 @@
   return 2.0f;
 }
 
-- (void)gazeTapFired:(NSTimer*)t
-{
-  self.gazeTapTimer = nil;
-  NSInteger n = self.gazeTapCount;
-  self.gazeTapCount = 0;
-  XBMCKey k = (n == 1) ? XBMCK_RETURN : (n == 2) ? XBMCK_ESCAPE : XBMCK_x;
-  NSLog(@"VISIONOS-GAZE taps=%ld key=%d", (long)n, (int)k);
-  [g_xbmcController sendKeyWithUnicode:k];
-}
 
 - (void)gazeArmFired:(NSTimer*)t
 {
@@ -262,21 +251,30 @@
     return;
   CGFloat dx = p.x - self.gazeStart.x;
   CGFloat dy = p.y - self.gazeStart.y;
-  CGFloat ax = fabs(dx), ay = fabs(dy);
-  if (ax < 40.0 && ay < 40.0)
+  if (fabs(dx) < 40.0 && fabs(dy) < 40.0)
     return;
   [self.gazeArmTimer invalidate];
   self.gazeArmTimer = nil;
   self.gazeIsDrag = YES;
+  NSLog(@"VISIONOS-GAZE drag started");
+}
+
+- (void)gazeDragEnded:(CGPoint)p
+{
+  CGFloat dx = p.x - self.gazeStart.x;
+  CGFloat dy = p.y - self.gazeStart.y;
+  CGFloat ax = fabs(dx), ay = fabs(dy);
   CGFloat hi = fmax(ax, ay), lo = fmin(ax, ay);
-  if (lo / hi >= 0.5)
+  if (hi <= 0.0 || lo / hi >= 0.5)
   {
     NSLog(@"VISIONOS-GAZE drag indeterminate dx=%.1f dy=%.1f", dx, dy);
     return;
   }
   XBMCKey k = (ax > ay) ? (dx > 0 ? XBMCK_RIGHT : XBMCK_LEFT)
                         : (dy > 0 ? XBMCK_DOWN : XBMCK_UP);
-  NSLog(@"VISIONOS-GAZE drag dx=%.1f dy=%.1f key=%d", dx, dy, (int)k);
+  if (k == XBMCK_RIGHT && self.gazeStart.x < 60.0)
+    k = XBMCK_ESCAPE;
+  NSLog(@"VISIONOS-GAZE drag dx=%.1f dy=%.1f startx=%.1f key=%d", dx, dy, self.gazeStart.x, (int)k);
   [g_xbmcController sendKey:k];
 }
 
@@ -311,9 +309,11 @@
     else if (!self.gazeIsDrag)
     {
       NSLog(@"VISIONOS-GAZE quick pinch");
-      self.gazeTapCount++;
-      [self.gazeTapTimer invalidate];
-      self.gazeTapTimer = [NSTimer scheduledTimerWithTimeInterval:0.9 target:self selector:@selector(gazeTapFired:) userInfo:nil repeats:NO];
+      [g_xbmcController sendKeyWithUnicode:XBMCK_RETURN];
+    }
+    else
+    {
+      [self gazeDragEnded:p];
     }
   }
 }
