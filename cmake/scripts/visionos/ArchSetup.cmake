@@ -54,7 +54,10 @@ list(APPEND DEPLIBS "-framework CoreFoundation" "-framework CoreVideo"
 
 # visionOS SDK identifier is "xros"
 set(CMAKE_OSX_SYSROOT xros)
-set(XROS_DEPLOYMENT_TARGET "1.0" CACHE STRING "Minimum visionOS deployment target version")
+# 2.0 floor: the stereo presentation uses RealityKit LowLevelTexture and
+# TextureResource(image:), both visionOS 2+ APIs held in stored properties
+# (which @available cannot gate).  Only 26.x hardware is targeted.
+set(XROS_DEPLOYMENT_TARGET "2.0" CACHE STRING "Minimum visionOS deployment target version")
 set(CMAKE_XCODE_ATTRIBUTE_XROS_DEPLOYMENT_TARGET ${XROS_DEPLOYMENT_TARGET})
 
 set(ENABLE_OPTICAL OFF CACHE BOOL "" FORCE)

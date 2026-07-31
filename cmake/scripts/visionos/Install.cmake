@@ -93,3 +93,29 @@ add_custom_command(TARGET ${APP_NAME_LC} POST_BUILD
 
 configure_file(${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/Credits.html.in
                ${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/Credits.html @ONLY)
+
+# --- Swift support (stereo presentation shim) ---------------------------------
+# Proven wiring from the Jul 31 CompositorServices experiment; reused as-is for
+# the windowed RealityKit stereo path.  Three hard-won facts encoded here:
+# 1. CMake's Swift try-compile probe builds a scratch project that compiles for
+#    macOS while linking with the xros flags, so it can never pass — assert the
+#    compiler works and skip the probe.  The real Xcode project sets
+#    SDKROOT=xros globally and compiles Swift correctly.
+# 2. Swift cannot be mixed into the existing ObjC++ targets — it gets its own
+#    small static library; the app's -ObjC link flag pulls the @objc classes
+#    from the archive (dead-strip is already off).
+# 3. The Swift target must NOT inherit Kodi's include paths or definitions:
+#    with xbmc/ on the header search path, the SDK's Network/AVFoundation
+#    framework modules resolve "Network.h" to Kodi's C++ xbmc/Network/Network.h
+#    and Clang module scanning fails ('string' file not found).
+set(CMAKE_Swift_COMPILER_WORKS TRUE)
+enable_language(Swift)
+add_library(kodi_visionos_swift STATIC
+            ${CMAKE_SOURCE_DIR}/xbmc/platform/darwin/visionos/VisionOSStereoView.swift)
+set_target_properties(kodi_visionos_swift PROPERTIES
+  XCODE_ATTRIBUTE_SWIFT_VERSION "5.0"
+  INCLUDE_DIRECTORIES ""
+  COMPILE_DEFINITIONS "")
+set_target_properties(${APP_NAME_LC} PROPERTIES
+  XCODE_ATTRIBUTE_ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES "NO")
+target_link_libraries(${APP_NAME_LC} kodi_visionos_swift)

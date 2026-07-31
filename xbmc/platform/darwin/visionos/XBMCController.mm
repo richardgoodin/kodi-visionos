@@ -8,6 +8,9 @@
 
 #import "platform/darwin/visionos/XBMCController.h"
 
+#import <objc/message.h>
+#import <objc/runtime.h>
+
 #include "CompileInfo.h"
 #include "FileItem.h"
 #include "ServiceBroker.h"
@@ -278,7 +281,10 @@ static XBMCKey XBMCKeyFromUIPress(UIPress* press)
 
   displayManager.screenScale = [glView getScreenScale];
 
-  self.view.backgroundColor = UIColor.blackColor;
+  // RealityKit-Mono: nothing native may render in the window — the display
+  // plane is the only visible rectangle.  (Was blackColor, which composited
+  // as a black rectangle at glass depth and z-fought the plane.)
+  self.view.backgroundColor = UIColor.clearColor;
   [self.view addSubview:glView];
 }
 
@@ -305,6 +311,42 @@ static XBMCKey XBMCKeyFromUIPress(UIPress* press)
   [super viewDidAppear:animated];
   [self becomeFirstResponder];
   [[UIApplication sharedApplication] beginReceivingRemoteControlEvents];
+
+  // RealityKit-Mono presentation: embed the RealityKit hosting view (the
+  // display plane that shows Kodi's IOSurface) as a child over the glView
+  // shortly after the window is up.  Runtime class lookup - no generated
+  // -Swift.h coupling.
+  static dispatch_once_t stereoOnce;
+  dispatch_once(&stereoOnce, ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+      Class presenterClass = NSClassFromString(@"VisionOSStereoPresenter");
+      if (!presenterClass)
+      {
+        CLog::Log(LOGERROR, "VISIONOS-STEREO: VisionOSStereoPresenter not found - Swift lib not linked?");
+        return;
+      }
+      id presenter = [[presenterClass alloc] init];
+      self.stereoPresenter = presenter;
+      UIViewController* vc = [presenter valueForKey:@"viewController"];
+      if (!vc)
+      {
+        CLog::Log(LOGERROR, "VISIONOS-STEREO: presenter returned no view controller");
+        return;
+      }
+      [self addChildViewController:vc];
+      // Cover the ENTIRE fixed desktop: subview of the glView so it inherits
+      // the drag-scaling transform and stays aligned through resizes.
+      vc.view.frame = self.glView.bounds;
+      // Input ENABLED: with the native stack fully transparent, UIKit views
+      // are not gaze-targetable — the RealityKit plane is the targetable
+      // content, and its gestures feed the gaze grammar via injectGazePhase.
+      vc.view.userInteractionEnabled = YES;
+      [presenter setValue:self.glView forKey:@"gazeTarget"];
+      [self.glView addSubview:vc.view];
+      [vc didMoveToParentViewController:self];
+    });
+  });
 }
 
 - (void)viewWillDisappear:(BOOL)animated
@@ -620,6 +662,22 @@ int KODI_Run(bool renderGUI)
 - (EGLContext)getEGLContextObj
 {
   return glView.eglContext;
+}
+
+#pragma mark - Stereo presentation
+
+// Render thread.  The presenter's update method only schedules main-actor
+// work, so the call itself is cheap and thread-safe.
+- (void)publishStereoSurface
+{
+  id presenter = self.stereoPresenter;
+  if (!presenter)
+    return;
+  IOSurfaceRef surface = self.glView.renderSurface;
+  if (!surface)
+    return;
+  ((void (*)(id, SEL, IOSurfaceRef))objc_msgSend)(presenter, @selector(updateWithIOSurface:),
+                                                  surface);
 }
 
 #pragma mark - init/deinit

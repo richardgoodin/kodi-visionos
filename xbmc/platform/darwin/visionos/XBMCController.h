@@ -46,6 +46,9 @@ class CFileItem;
 @property(nonatomic, strong) DarwinEmbedNowPlayingInfoManager* MPNPInfoManager;
 @property(nonatomic, strong) VisionOSDisplayManager* displayManager;
 @property(nonatomic, strong) VisionOSGLView* glView;
+// RealityKit stereo presenter (VisionOSStereoPresenter, Swift) — held as id
+// to avoid -Swift.h coupling.
+@property(nonatomic, strong) id stereoPresenter;
 
 - (void)sendKey:(XBMCKey)key;
 - (void)sendKeyDown:(XBMCKey)key;
@@ -74,6 +77,10 @@ class CFileItem;
 - (CGRect)fullscreenSubviewFrame;
 
 - (EGLContext)getEGLContextObj;
+
+// Called from the render thread after each finished frame: hands the shared
+// render IOSurface to the RealityKit stereo presenter for display.
+- (void)publishStereoSurface;
 
 @end
 

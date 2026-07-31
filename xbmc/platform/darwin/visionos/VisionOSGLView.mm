@@ -20,6 +20,14 @@
 // GLES headers from ANGLE
 #include <GLES3/gl3.h>
 
+#ifndef GL_BGRA_EXT
+#define GL_BGRA_EXT 0x80E1
+#endif
+
+// Shared sequence number for the frame-timing logs below (single render
+// thread).  Commented out with them — re-enable together.
+// static int s_stereoLogSeq = 0;
+
 // ANGLE EGL extension for Metal layer surfaces
 #ifndef EGL_ANGLE_platform_angle_metal
 #define EGL_ANGLE_platform_angle_metal 1
@@ -64,6 +72,7 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
 @synthesize eglContext = m_eglContext;
 @synthesize eglDisplay = m_eglDisplay;
 @synthesize eglSurface = m_eglSurface;
+@synthesize renderSurface = m_renderSurface;
 
 // visionOS uses CAMetalLayer as the backing layer for ANGLE
 + (Class)layerClass
@@ -81,19 +90,47 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
     CAMetalLayer* metalLayer = static_cast<CAMetalLayer*>(self.layer);
     metalLayer.contentsScale = scale;
     self.userInteractionEnabled = YES;
+
     UILongPressGestureRecognizer* press = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(gazePressed:)];
     press.minimumPressDuration = 0.0;
     [self addGestureRecognizer:press];
     VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze recognizer installed");
-    metalLayer.opaque = YES;
+    // RealityKit-Mono: the layer is NOT a render target (EGL never touches
+    // it) and must contribute NOTHING visually — an opaque never-presented
+    // CAMetalLayer composites as solid black at the glass depth and
+    // z-fights the display plane (the "popping against black").  Fully
+    // transparent: the RealityKit plane is the only rectangle rendered.
+    metalLayer.opaque = NO;
+    metalLayer.backgroundColor = UIColor.clearColor.CGColor;
+    self.backgroundColor = UIColor.clearColor;
     metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    // VISIONOS_STAGE2: framebufferOnly=NO enables readbacks needed for some effects
 
     if (![self initEGL])
     {
       VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: failed to initialise ANGLE EGL");
       return nil;
     }
+
+    // RealityKit-Mono: the actual display target.  Kodi renders into this
+    // IOSurface (via the FBO set up lazily on the render thread); the
+    // RealityKit plane samples it.  Physical size matches the fixed
+    // desktop: 1920x1080 pt at 2x = 3840x2160 px.
+    NSDictionary* surfProps = @{
+      (id)kIOSurfaceWidth : @(3840),
+      (id)kIOSurfaceHeight : @(2160),
+      (id)kIOSurfaceBytesPerElement : @(4),
+      (id)kIOSurfacePixelFormat : @((uint32_t)'BGRA'),
+    };
+    m_renderSurface = IOSurfaceCreate((__bridge CFDictionaryRef)surfProps);
+    if (!m_renderSurface)
+      VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: IOSurfaceCreate failed");
+
+    // Presentation-rate sync (replaces eglSwapBuffers' implicit vsync
+    // blocking): tick at the display's real refresh rate, signal the render
+    // thread.
+    m_vsyncSem = dispatch_semaphore_create(0);
+    m_vsyncLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(vsyncTick:)];
+    [m_vsyncLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
   }
   return self;
 }
@@ -130,8 +167,13 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
   }
   VISIONOS_SHELL_LOG(LOGINFO, "VisionOSGLView: EGL {}.{} on Metal", major, minor);
 
-  // Choose config
+  // Choose config.  EGL_SURFACE_TYPE must include PBUFFER: the context's
+  // current draw surface is an offscreen pbuffer (the CAMetalLayer is not
+  // used by EGL at all — a window surface on a never-presented layer makes
+  // ANGLE block on the layer's exhausted drawable pool, stalling every
+  // frame boundary to timeout cadence: the ~10 s/frame symptom).
   const EGLint configAttribs[] = {
+      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
       EGL_RED_SIZE, 8,
       EGL_GREEN_SIZE, 8,
       EGL_BLUE_SIZE, 8,
@@ -145,6 +187,7 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
   {
     // Fallback to GLES 2
     const EGLint fallbackAttribs[] = {
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
@@ -175,13 +218,16 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
     return NO;
   }
 
-  // Create window surface from the CAMetalLayer
-  CAMetalLayer* metalLayer = static_cast<CAMetalLayer*>(self.layer);
-  m_eglSurface = eglCreateWindowSurface(m_eglDisplay, m_eglConfig,
-                                        (__bridge EGLNativeWindowType)metalLayer, nullptr);
+  // Offscreen current-surface: a plain pbuffer at the render resolution.
+  // NOT the render target (Kodi draws into the IOSurface FBO) — it exists
+  // so the context has a valid current draw surface and so
+  // CWinSystemVisionOS::GetScreenResolution's eglQuerySurface reports
+  // 3840x2160.  The CAMetalLayer is deliberately absent from EGL entirely.
+  const EGLint pbufferAttribs[] = {EGL_WIDTH, 3840, EGL_HEIGHT, 2160, EGL_NONE};
+  m_eglSurface = eglCreatePbufferSurface(m_eglDisplay, m_eglConfig, pbufferAttribs);
   if (m_eglSurface == EGL_NO_SURFACE)
   {
-    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglCreateWindowSurface failed (err={})",
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: eglCreatePbufferSurface failed (err={})",
                        eglGetError());
     return NO;
   }
@@ -235,16 +281,147 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
         eglGetCurrentSurface(EGL_DRAW) != m_eglSurface)
       eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0); // ANGLE default framebuffer
+    // RealityKit-Mono: first call on the render thread builds the
+    // IOSurface-backed FBO (needs a current context, which the main thread
+    // deliberately never holds).
+    if (!m_renderFBO && m_renderSurface)
+      [self setupRenderTarget];
+
+    if (m_renderFBO)
+    {
+      glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBO);
+      // Frame timing (1/3), with s_stereoLogSeq at the top of the file:
+      // NSLog(@"VISIONOS-STEREO: #%d draw-start %.6f", ++s_stereoLogSeq, CACurrentMediaTime());
+    }
+    else
+      glBindFramebuffer(GL_FRAMEBUFFER, 0); // ANGLE default framebuffer
     glViewport(0, 0, m_framebufferWidth, m_framebufferHeight);
     glScissor(0, 0, m_framebufferWidth, m_framebufferHeight);
   }
+}
+
+// Build the FBO whose color attachment is the shared IOSurface, using the
+// same ANGLE client-buffer mechanism the VTB renderer uses for decode
+// surfaces — in reverse (render INTO the IOSurface instead of sampling it).
+// Must run on the render thread with the EGL context current.
+- (void)setupRenderTarget
+{
+  const EGLint cfgAttribs[] = {EGL_SURFACE_TYPE,         EGL_PBUFFER_BIT,
+                               EGL_RENDERABLE_TYPE,      EGL_OPENGL_ES2_BIT,
+                               EGL_RED_SIZE,             8,
+                               EGL_GREEN_SIZE,           8,
+                               EGL_BLUE_SIZE,            8,
+                               EGL_ALPHA_SIZE,           8,
+                               EGL_BIND_TO_TEXTURE_RGBA, EGL_TRUE,
+                               EGL_NONE};
+  EGLConfig cfg = nullptr;
+  EGLint numConfigs = 0;
+  if (!eglChooseConfig(m_eglDisplay, cfgAttribs, &cfg, 1, &numConfigs) || numConfigs < 1)
+  {
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: stereo pbuffer eglChooseConfig failed (0x{:x})",
+                       static_cast<unsigned>(eglGetError()));
+    return;
+  }
+
+  glGenRenderbuffers(1, &m_renderDepthRB);
+  glBindRenderbuffer(GL_RENDERBUFFER, m_renderDepthRB);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 3840, 2160);
+
+  const EGLint attribs[] = {EGL_WIDTH,
+                            3840,
+                            EGL_HEIGHT,
+                            2160,
+                            EGL_IOSURFACE_PLANE_ANGLE,
+                            0,
+                            EGL_TEXTURE_TARGET,
+                            EGL_TEXTURE_2D,
+                            EGL_TEXTURE_FORMAT,
+                            EGL_TEXTURE_RGBA,
+                            EGL_TEXTURE_INTERNAL_FORMAT_ANGLE,
+                            GL_BGRA_EXT,
+                            EGL_TEXTURE_TYPE_ANGLE,
+                            GL_UNSIGNED_BYTE,
+                            EGL_NONE};
+  m_renderPbuffer = eglCreatePbufferFromClientBuffer(
+      m_eglDisplay, EGL_IOSURFACE_ANGLE, reinterpret_cast<EGLClientBuffer>(m_renderSurface), cfg,
+      attribs);
+  if (m_renderPbuffer == EGL_NO_SURFACE)
+  {
+    VISIONOS_SHELL_LOG(LOGERROR,
+                       "VisionOSGLView: render-target eglCreatePbufferFromClientBuffer failed (0x{:x})",
+                       static_cast<unsigned>(eglGetError()));
+    return;
+  }
+
+  glGenTextures(1, &m_renderTexture);
+  glBindTexture(GL_TEXTURE_2D, m_renderTexture);
+  if (!eglBindTexImage(m_eglDisplay, m_renderPbuffer, EGL_BACK_BUFFER))
+  {
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: render-target eglBindTexImage failed (0x{:x})",
+                       static_cast<unsigned>(eglGetError()));
+    glDeleteTextures(1, &m_renderTexture);
+    m_renderTexture = 0;
+    eglDestroySurface(m_eglDisplay, m_renderPbuffer);
+    m_renderPbuffer = EGL_NO_SURFACE;
+    return;
+  }
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  glGenFramebuffers(1, &m_renderFBO);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBO);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_renderTexture, 0);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
+                            m_renderDepthRB);
+
+  const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE)
+  {
+    VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: render-target FBO incomplete (0x{:x})",
+                       static_cast<unsigned>(status));
+    glDeleteFramebuffers(1, &m_renderFBO);
+    m_renderFBO = 0;
+    return;
+  }
+}
+
+- (void)vsyncTick:(CADisplayLink*)link
+{
+  dispatch_semaphore_signal(m_vsyncSem);
 }
 
 - (bool)presentFramebuffer
 {
   if (m_eglDisplay == EGL_NO_DISPLAY || m_eglSurface == EGL_NO_SURFACE)
     return false;
+
+  if (m_renderFBO)
+  {
+    // Frame timing (2/3) — CPU draw complete, before the vsync wait:
+    // NSLog(@"VISIONOS-STEREO: #%d draw-done %.6f", ++s_stereoLogSeq, CACurrentMediaTime());
+
+    // Sync to the PRESENTATION RATE: drain any stale vsync signals, then
+    // block until the next display-link tick — the same contract
+    // eglSwapBuffers used to provide.  No timeout: if the display link is
+    // not ticking at 90 Hz we are dead anyway, and a hard block makes that
+    // visible instead of masking it.
+    if (m_vsyncSem)
+    {
+      while (dispatch_semaphore_wait(m_vsyncSem, DISPATCH_TIME_NOW) == 0)
+        ;
+      dispatch_semaphore_wait(m_vsyncSem, DISPATCH_TIME_FOREVER);
+    }
+
+    glFinish();
+    // Frame timing (3/3) — after vsync wait + glFinish:
+    // NSLog(@"VISIONOS-STEREO: #%d draw-end %.6f", ++s_stereoLogSeq, CACurrentMediaTime());
+
+    [g_xbmcController publishStereoSurface];
+    return true;
+  }
 
   return eglSwapBuffers(m_eglDisplay, m_eglSurface) == EGL_TRUE;
 }
@@ -304,10 +481,10 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
   [g_xbmcController sendKey:k];
 }
 
-- (void)gazePressed:(UILongPressGestureRecognizer*)g
+- (void)injectGazePhase:(NSInteger)phase x:(double)x y:(double)y
 {
-  CGPoint p = [g locationInView:self];
-  if (g.state == UIGestureRecognizerStateBegan)
+  CGPoint p = CGPointMake(x, y);
+  if (phase == 0)
   {
     VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze down x={:.1f} y={:.1f}", p.x, p.y);
     self.gazeStart = p;
@@ -315,12 +492,11 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
     self.gazeEnterDown = NO;
     self.gazeArmTimer = [NSTimer scheduledTimerWithTimeInterval:GAZE_ARM_DELAY target:self selector:@selector(gazeArmFired:) userInfo:nil repeats:NO];
   }
-  else if (g.state == UIGestureRecognizerStateChanged)
+  else if (phase == 1)
   {
     [self gazeDragChanged:p];
   }
-  else if (g.state == UIGestureRecognizerStateEnded ||
-           g.state == UIGestureRecognizerStateCancelled)
+  else
   {
     [self.gazeHoldTimer invalidate];
     self.gazeHoldTimer = nil;
@@ -344,33 +520,24 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
   }
 }
 
+- (void)gazePressed:(UILongPressGestureRecognizer*)g
+{
+  CGPoint p = [g locationInView:self];
+  if (g.state == UIGestureRecognizerStateBegan)
+    [self injectGazePhase:0 x:p.x y:p.y];
+  else if (g.state == UIGestureRecognizerStateChanged)
+    [self injectGazePhase:1 x:p.x y:p.y];
+  else if (g.state == UIGestureRecognizerStateEnded ||
+           g.state == UIGestureRecognizerStateCancelled)
+    [self injectGazePhase:2 x:p.x y:p.y];
+}
+
 - (void)layoutSubviews
 {
   [super layoutSubviews];
-
-  // Recreate the EGL surface when the view resizes.
-  // Do NOT call eglMakeCurrent here — the context is owned by the XBMC_Run
-  // render thread.  Only recreate the surface object; setFramebuffer will
-  // rebind it on the render thread on the next frame.
-  if (m_eglDisplay != EGL_NO_DISPLAY && m_eglSurface != EGL_NO_SURFACE)
-  {
-    // Detach whatever is current (may be nothing, may be the render thread's
-    // binding — the render thread will rebind via setFramebuffer next frame).
-    eglMakeCurrent(m_eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    eglDestroySurface(m_eglDisplay, m_eglSurface);
-    m_eglSurface = EGL_NO_SURFACE;
-
-    CAMetalLayer* metalLayer = static_cast<CAMetalLayer*>(self.layer);
-    m_eglSurface = eglCreateWindowSurface(m_eglDisplay, m_eglConfig,
-                                          (__bridge EGLNativeWindowType)metalLayer,
-                                          nullptr);
-    if (m_eglSurface != EGL_NO_SURFACE)
-    {
-      // Update cached dimensions without touching context ownership.
-      eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_WIDTH, &m_framebufferWidth);
-      eglQuerySurface(m_eglDisplay, m_eglSurface, EGL_HEIGHT, &m_framebufferHeight);
-    }
-  }
+  // EGL no longer touches the CAMetalLayer (offscreen pbuffer + IOSurface
+  // FBO), and the fixed-desktop model keeps this view's bounds constant —
+  // nothing to recreate on layout.
 }
 
 @end
