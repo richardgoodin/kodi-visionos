@@ -419,22 +419,6 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
       dispatch_semaphore_wait(m_vsyncSem, DISPATCH_TIME_FOREVER);
     }
 
-    // EDR STEP STRIP (temporary): four 200x400 patches, encoded values that
-    // the decode kernel maps to 0.5x / 1x / 2x / 4x linear.  Readout:
-    //   0.5x darker than 1x        = probe + decode plumbing sane
-    //   2x/4x brighter, in steps   = EDR through, headroom measurable
-    //   2x/4x identical to 1x      = clamped OR zero current headroom
-    glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBO);
-    glEnable(GL_SCISSOR_TEST);
-    static const float kSteps[4] = {0.7354f, 1.0f, 1.3533f, 1.8248f};
-    for (int i = 0; i < 4; ++i)
-    {
-      glScissor(i * 200, 0, 200, 400);
-      glClearColor(kSteps[i], kSteps[i], kSteps[i], 1.0f);
-      glClear(GL_COLOR_BUFFER_BIT);
-    }
-    glScissor(0, 0, m_framebufferWidth, m_framebufferHeight);
-
     glFinish();
     // Frame timing (3/3) — after vsync wait + glFinish:
     // NSLog(@"VISIONOS-STEREO: #%d draw-end %.6f", ++s_stereoLogSeq, CACurrentMediaTime());
