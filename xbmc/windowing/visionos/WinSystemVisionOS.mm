@@ -32,8 +32,10 @@
 #include "cores/VideoPlayer/VideoRenderers/RenderFactory.h"
 #include "filesystem/SpecialProtocol.h"
 #include "guilib/DispResource.h"
+#include "guilib/IDirtyRegionSolver.h"
 #include "guilib/Texture.h"
 #include "messaging/ApplicationMessenger.h"
+#include "settings/AdvancedSettings.h"
 #include "settings/DisplaySettings.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
@@ -174,6 +176,17 @@ bool CWinSystemVisionOS::CreateNewWindow(const std::string& name,
   [g_xbmcController setFramebuffer];
 
   m_bWindowCreated = true;
+
+  // Dirty-region optimization is disabled on this platform by design: the
+  // full composite is republished wholesale into an IOSurface every frame,
+  // video behind GUI windows is drawn outside the dirty-region system, and
+  // partial redraw assumes framebuffer retention that the BufferQueue
+  // presentation model doesn't provide.  Force the fill-viewport-always
+  // solver: every iteration renders the whole frame and presents — the
+  // vsync block in presentFramebuffer paces the loop.  Must be set before
+  // CGUIWindowManager::Initialize() runs SelectAlgorithm().
+  CServiceBroker::GetSettingsComponent()->GetAdvancedSettings()->m_guiAlgorithmDirtyRegions =
+      DIRTYREGION_SOLVER_FILL_VIEWPORT_ALWAYS;
 
   m_eglext = " ";
 

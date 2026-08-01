@@ -31,16 +31,26 @@
   GLint m_framebufferWidth;
   GLint m_framebufferHeight;
 
-  // RealityKit-Mono render target: Kodi renders into this IOSurface-backed
-  // FBO instead of the CAMetalLayer window surface (which is no longer
-  // presented).  Single-buffered: double buffering was tried and did not
-  // change the peripheral artifacts (they are foveation/aliasing, not a
-  // reader/writer race).
-  IOSurfaceRef m_renderSurface;
-  EGLSurface m_renderPbuffer;
-  GLuint m_renderTexture;
-  GLuint m_renderFBO;
-  GLuint m_renderDepthRB;
+  // RealityKit-Mono render target, two-slot BufferQueue (Android-style):
+  // Kodi renders into IOSurface-backed FBOs instead of the CAMetalLayer
+  // window surface (which is no longer presented).  Two buffers + a
+  // per-buffer release fence rebuild the eglSwapBuffers contract the
+  // IOSurface publish path lost: the producer never writes a surface the
+  // RealityKit blit hasn't finished reading (the single-buffer
+  // reader/writer race showed as whole layers missing from displayed
+  // frames — the list-over-video flashing).
+  IOSurfaceRef m_renderSurfaces[2];
+  EGLSurface m_renderPbuffers[2];
+  GLuint m_renderTextures[2];
+  GLuint m_renderFBOs[2];
+  GLuint m_renderDepthRB; // shared: the consumer never reads depth
+  int m_renderIndex; // buffer being drawn this frame
+  // Release fence, signaled by the Swift side's blit GPU-completion
+  // handler (the BufferQueue releaseBuffer).  Armed only after the first
+  // release ever arrives — before the RealityKit side attaches, no
+  // releases flow and waiting would deadlock startup.
+  dispatch_semaphore_t m_releaseSems[2];
+  BOOL m_releaseFenceLive;
 
   // Presentation-rate sync: a CADisplayLink on the main run loop signals
   // this semaphore each refresh; presentFramebuffer blocks on it.
@@ -51,6 +61,8 @@
 @property(readonly) EGLContext eglContext;
 @property(readonly) EGLDisplay eglDisplay;
 @property(readonly) EGLSurface eglSurface;
+// The surface to publish: the buffer just completed (current index — read
+// during presentFramebuffer's publish, before the index flips).
 @property(readonly) IOSurfaceRef renderSurface;
 
 - (instancetype)initWithFrame:(CGRect)frame;
@@ -70,6 +82,11 @@
 // native stack is fully transparent and transparent UIKit views are not
 // gaze-targetable on visionOS — the RealityKit plane is the input surface.
 - (void)injectGazePhase:(NSInteger)phase x:(double)x y:(double)y;
+
+// Release fence (BufferQueue releaseBuffer): called from the Swift side's
+// blit completion handler (any thread) when RealityKit is done reading the
+// surface with this IOSurfaceID.  Frees that buffer for the producer.
+- (void)releaseSurfaceWithID:(uint32_t)surfaceID;
 
 - (CGFloat)getScreenScale;
 

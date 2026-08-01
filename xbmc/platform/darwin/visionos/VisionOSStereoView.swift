@@ -76,8 +76,8 @@ final class StereoBridge {
   private var queue: MTLCommandQueue?
   private var lowLevel: LowLevelTexture?
   private var decodePipeline: MTLComputePipelineState?
-  // One cached wrap of the render IOSurface (a single fixed allocation),
-  // keyed by IOSurfaceID.
+  // One cached wrap per render IOSurface (two fixed allocations — the
+  // producer's two-slot BufferQueue), keyed by IOSurfaceID.
   private var srcTextures: [UInt32: MTLTexture] = [:]
   private var attached = false
 
@@ -87,6 +87,25 @@ final class StereoBridge {
   var gazeTarget: NSObject?
   private static let gazeSel = NSSelectorFromString("injectGazePhase:x:y:")
   private typealias GazeInjectFn = @convention(c) (NSObject, Selector, Int, Double, Double) -> Void
+
+  /// BufferQueue releaseBuffer: same dynamic-IMP route as gaze, into the
+  /// glView's releaseSurfaceWithID:.  Callable from any thread (render
+  /// thread on coalesce, MainActor on early-outs, Metal completion thread
+  /// after a real read).  INVARIANT: every surface handed to submit() gets
+  /// exactly one release — instantly if it is never read, or on GPU
+  /// completion of the blit that read it.  Before the glView target is set
+  /// this no-ops, which is correct: the producer's fence only arms on the
+  /// first release it receives.
+  private static let releaseSel = NSSelectorFromString("releaseSurfaceWithID:")
+  private typealias ReleaseFn = @convention(c) (NSObject, Selector, UInt32) -> Void
+
+  private func sendRelease(_ surfaceID: UInt32) {
+    guard let target = gazeTarget, target.responds(to: Self.releaseSel),
+          let imp = target.method(for: Self.releaseSel)
+    else { return }
+    let fn = unsafeBitCast(imp, to: ReleaseFn.self)
+    fn(target, Self.releaseSel, surfaceID)
+  }
 
   /// Presentation decode: the float IOSurface holds EXTENDED-sRGB-ENCODED
   /// values (Kodi's GUI writes its normal sRGB output; the HDR video path
@@ -123,10 +142,18 @@ final class StereoBridge {
   }
 
   /// Render thread: coalesce to the newest surface and poke the main actor.
+  /// A replaced (never-to-be-read) surface is released immediately.
   func submit(_ surface: IOSurfaceRef) {
+    var dropped: IOSurfaceRef?
     lock.lock()
+    if let old = pendingSurface, IOSurfaceGetID(old) != IOSurfaceGetID(surface) {
+      dropped = old
+    }
     pendingSurface = surface
     lock.unlock()
+    if let dropped {
+      sendRelease(IOSurfaceGetID(dropped))
+    }
     Task { @MainActor in
       self.drain()
     }
@@ -191,32 +218,49 @@ final class StereoBridge {
   }
 
   /// MainActor: blit the newest published frame into the LowLevelTexture.
+  /// Every taken surface is released — by the command buffer's completion
+  /// handler when the blit commits, or immediately on any path that
+  /// returns without committing.
   @MainActor
   func drain() {
+    guard let surface = takePending() else { return }
+    let surfaceID = IOSurfaceGetID(surface)
+
     guard attached,
-          let surface = takePending(),
           let device,
           let queue,
           let llt = lowLevel
-    else { return }
+    else {
+      sendRelease(surfaceID)
+      return
+    }
 
-    let surfaceID = IOSurfaceGetID(surface)
     var src = srcTextures[surfaceID]
     if src == nil {
       let d = MTLTextureDescriptor.texture2DDescriptor(
-          pixelFormat: .rgba16Float, // EDR TEST: matches the 'RGhA' IOSurface
+          pixelFormat: .rgba16Float, // EDR: matches the 'RGhA' IOSurfaces
           width: kSurfaceWidth, height: kSurfaceHeight, mipmapped: false)
       d.usage = [.shaderRead]
       src = device.makeTexture(descriptor: d, iosurface: surface, plane: 0)
       if src == nil {
         NSLog("VISIONOS-STEREO: IOSurface -> MTLTexture wrap FAILED")
+        sendRelease(surfaceID)
         return
       }
       srcTextures[surfaceID] = src
     }
     guard let src,
           let cmd = queue.makeCommandBuffer()
-    else { return }
+    else {
+      sendRelease(surfaceID)
+      return
+    }
+
+    // Release fence: fires on GPU completion of the read — the moment the
+    // producer may write this surface again.
+    cmd.addCompletedHandler { [weak self] _ in
+      self?.sendRelease(surfaceID)
+    }
 
     let dst = llt.replace(using: cmd)
 
@@ -244,7 +288,11 @@ final class StereoBridge {
     }
 
     // Fallback: straight blit (no decode).
-    guard let blit = cmd.makeBlitCommandEncoder() else { return }
+    guard let blit = cmd.makeBlitCommandEncoder() else {
+      // Never committed — the completion handler will not fire.
+      sendRelease(surfaceID)
+      return
+    }
     blit.copy(from: src,
               sourceSlice: 0, sourceLevel: 0,
               sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
