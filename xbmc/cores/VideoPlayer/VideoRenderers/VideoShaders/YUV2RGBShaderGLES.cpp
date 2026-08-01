@@ -152,11 +152,14 @@ bool BaseYUV2RGBGLSLShader::OnEnabled()
   {
     // The EDR block does its own primaries conversion (m_colorConversion is
     // off in this mode), so upload the matrix here.  m_toneP1 carries the
-    // headroom in multiples of SDR reference white; ~2x device-measured in
-    // normal conditions — dynamic headroom query is a later refinement.
+    // headroom in multiples of SDR reference white.  No public visionOS API
+    // exposes the live headroom (UIScreen is API_UNAVAILABLE, RealityKit's
+    // EDRHeadroomPolicy is SPI as of 26.5), so it is user-scaled: the OSD
+    // "tone mapping parameter" slider (SetToneMapParam, default 1.0) scales
+    // the device-measured ~2x baseline live during playback.
     Matrix3 primMat = m_convMatrix.GetPrimMat();
     glUniformMatrix3fv(m_hPrimMat, 1, GL_FALSE, primMat.ToRaw());
-    glUniform1f(m_hToneP1, 2.0f);
+    glUniform1f(m_hToneP1, 2.0f * m_toneMappingParam);
   }
 #endif
 
