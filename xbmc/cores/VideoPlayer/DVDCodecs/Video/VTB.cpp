@@ -15,11 +15,13 @@
 #include "cores/VideoPlayer/Process/ProcessInfo.h"
 #include "settings/Settings.h"
 #include "settings/SettingsComponent.h"
+#include "utils/log.h"
 
 #include <mutex>
 
 extern "C" {
 #include <libavcodec/videotoolbox.h>
+#include <libavutil/pixdesc.h>
 }
 
 using namespace VTB;
@@ -175,7 +177,22 @@ bool CDecoder::Open(AVCodecContext *avctx, AVCodecContext* mainctx, enum AVPixel
   AVBufferRef *framesRef = av_hwframe_ctx_alloc(deviceRef);
   AVHWFramesContext *framesCtx = (AVHWFramesContext*)framesRef->data;
   framesCtx->format = AV_PIX_FMT_VIDEOTOOLBOX;
+#if defined(TARGET_DARWIN_VISIONOS)
+  // HDR: ask VideoToolbox for P010 ('x420' IOSurfaces) when the source is
+  // 10-bit instead of downconverting to 8-bit NV12 — CRendererVTBVisionOS
+  // binds the 16-bit planes (R16/RG16 via ANGLE).  Guarded: other Darwin
+  // targets keep NV12 for their 8-bit renderers.
+  {
+    const AVPixFmtDescriptor* swDesc = av_pix_fmt_desc_get(avctx->sw_pix_fmt);
+    const bool tenBit = swDesc && swDesc->comp[0].depth > 8;
+    framesCtx->sw_format = tenBit ? AV_PIX_FMT_P010LE : AV_PIX_FMT_NV12;
+    if (tenBit)
+      CLog::Log(LOGINFO, "VTB::CDecoder: 10-bit source ({}), requesting P010 output",
+                av_get_pix_fmt_name(avctx->sw_pix_fmt));
+  }
+#else
   framesCtx->sw_format = AV_PIX_FMT_NV12;
+#endif
   avctx->hw_frames_ctx = framesRef;
   m_avctx = avctx;
 
