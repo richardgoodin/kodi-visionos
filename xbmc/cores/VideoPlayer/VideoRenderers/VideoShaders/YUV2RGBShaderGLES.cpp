@@ -50,13 +50,30 @@ BaseYUV2RGBGLSLShader::BaseYUV2RGBGLSLShader(EShaderFormat format,
   else
     CLog::Log(LOGERROR, "GLES: BaseYUV2RGBGLSLShader - unsupported format {}", m_format);
 
-  if (dstPrimaries != srcPrimaries)
+#if defined(TARGET_DARWIN_VISIONOS)
+  // EDR output: where other platforms tone-map HDR PQ down to SDR, emit
+  // extended-dynamic-range output instead — the RealityKit presentation
+  // chain passes linear values above 1.0 through to the display's EDR
+  // headroom (device-verified).  The EDR shader block performs its own
+  // linear-domain BT.2020->BT.709 conversion, so the gamma-approximate
+  // XBMC_COL_CONVERSION path must stay off in this mode.
+  if (toneMap)
+  {
+    m_edrOutput = true;
+    // Deliberately NOT setting m_toneMapping/m_toneMappingMethod: OnEnabled's
+    // per-method block would re-upload m_toneP1 (our headroom uniform) with
+    // the SDR tone-map parameter.  EDR mode uploads its own uniforms below.
+    m_defines += "#define KODI_TONE_MAPPING_EDR\n";
+  }
+#endif
+
+  if (dstPrimaries != srcPrimaries && !m_edrOutput)
   {
     m_colorConversion = true;
     m_defines += "#define XBMC_COL_CONVERSION\n";
   }
 
-  if (toneMap)
+  if (toneMap && !m_edrOutput)
   {
     m_toneMapping = true;
     m_toneMappingMethod = toneMapMethod;
@@ -129,6 +146,19 @@ bool BaseYUV2RGBGLSLShader::OnEnabled()
     glUniform1f(m_hGammaSrc, m_convMatrix.GetGammaSrc());
     glUniform1f(m_hGammaDstInv, 1 / m_convMatrix.GetGammaDst());
   }
+
+#if defined(TARGET_DARWIN_VISIONOS)
+  if (m_edrOutput)
+  {
+    // The EDR block does its own primaries conversion (m_colorConversion is
+    // off in this mode), so upload the matrix here.  m_toneP1 carries the
+    // headroom in multiples of SDR reference white; ~2x device-measured in
+    // normal conditions — dynamic headroom query is a later refinement.
+    Matrix3 primMat = m_convMatrix.GetPrimMat();
+    glUniformMatrix3fv(m_hPrimMat, 1, GL_FALSE, primMat.ToRaw());
+    glUniform1f(m_hToneP1, 2.0f);
+  }
+#endif
 
   if (m_toneMapping)
   {

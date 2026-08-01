@@ -74,6 +74,11 @@ class BaseYUV2RGBGLSLShader : public CGLSLShaderProgram
 
     bool m_colorConversion{false};
 
+    // visionOS EDR output mode (KODI_TONE_MAPPING_EDR): emit extended-range
+    // values into display headroom instead of tone mapping to SDR.  Inert
+    // (never set) on other platforms.
+    bool m_edrOutput{false};
+
     float m_black;
     float m_contrast;
 

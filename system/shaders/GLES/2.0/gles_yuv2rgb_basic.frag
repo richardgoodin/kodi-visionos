@@ -88,6 +88,19 @@ void main()
 
 #endif
 
+#if defined(KODI_TONE_MAPPING_EDR)
+  // visionOS EDR: PQ signal -> linear (1.0 = 10000 nits) -> SDR-white
+  // relative (203 nit reference) -> BT.2020->BT.709 primaries in true
+  // linear -> shoulder into headroom (m_toneP1) -> extended-sRGB encode.
+  // XBMC_COL_CONVERSION is deliberately not defined in this mode: its
+  // gamma-approximate primaries conversion is wrong for PQ material.
+  rgb.rgb = inversePQ(rgb.rgb);
+  rgb.rgb *= 10000.0 / 203.0;
+  rgb.rgb = max(vec3(0.0), m_primMat * rgb.rgb);
+  rgb.rgb = edrShoulder(rgb.rgb, m_toneP1);
+  rgb.rgb = srgbEncode(rgb.rgb);
+#endif
+
   gl_FragColor = rgb;
 }
 

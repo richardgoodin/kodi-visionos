@@ -1,4 +1,4 @@
-#if (defined(KODI_TONE_MAPPING_ACES) || defined(KODI_TONE_MAPPING_HABLE))
+#if (defined(KODI_TONE_MAPPING_ACES) || defined(KODI_TONE_MAPPING_HABLE) || defined(KODI_TONE_MAPPING_EDR))
 const float ST2084_m1 = 2610.0 / (4096.0 * 4.0);
 const float ST2084_m2 = (2523.0 / 4096.0) * 128.0;
 const float ST2084_c1 = 3424.0 / 4096.0;
@@ -38,13 +38,42 @@ vec3 hable(vec3 x)
 }
 #endif
 
-#if (defined(KODI_TONE_MAPPING_ACES) || defined(KODI_TONE_MAPPING_HABLE))
+#if (defined(KODI_TONE_MAPPING_ACES) || defined(KODI_TONE_MAPPING_HABLE) || defined(KODI_TONE_MAPPING_EDR))
 vec3 inversePQ(vec3 x)
 {
   x = pow(max(x, 0.0), vec3(1.0 / ST2084_m2));
   x = max(x - ST2084_c1, 0.0) / (ST2084_c2 - ST2084_c3 * x);
   x = pow(x, vec3(1.0 / ST2084_m1));
   return x;
+}
+#endif
+
+#if defined(KODI_TONE_MAPPING_EDR)
+// visionOS EDR output (KODI_TONE_MAPPING_EDR): instead of tone mapping to
+// SDR, emit linear-light values above 1.0 into the display's EDR headroom.
+
+// Luminance-preserving shoulder: linear through SDR white (1.0), excess
+// compressed rationally toward the headroom asymptote H (in multiples of
+// SDR reference white).
+vec3 edrShoulder(vec3 rgb, float H)
+{
+  float l = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+  if (l <= 1.0 || H <= 1.0)
+    return rgb;
+  float e = l - 1.0;
+  float el = e / (1.0 + e / (H - 1.0));
+  return rgb * ((1.0 + el) / l);
+}
+
+// Extended sRGB OETF — the piecewise curve continued above 1.0.  The
+// presentation-side compute kernel (srgbDecode) applies the exact inverse,
+// so the surface convention stays uniform with the sRGB-encoded GUI.
+vec3 srgbEncode(vec3 x)
+{
+  x = max(x, vec3(0.0));
+  vec3 lo = 12.92 * x;
+  vec3 hi = 1.055 * pow(x, vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(vec3(0.0031308), x));
 }
 #endif
 
