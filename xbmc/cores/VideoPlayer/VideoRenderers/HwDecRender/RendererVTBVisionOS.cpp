@@ -166,7 +166,10 @@ bool CRendererVTBVisionOS::UploadTexture(int index)
   }
 
   const OSType format_type = IOSurfaceGetPixelFormat(surface);
-  if (format_type != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange &&
+  // HDR: 10-bit P010 ('x420'/'xf20') binds as MSB-aligned 16-bit unorm planes.
+  const bool tenBit = format_type == kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ||
+                      format_type == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange;
+  if (!tenBit && format_type != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange &&
       format_type != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
   {
     CLog::Log(LOGERROR, "CRendererVTBVisionOS: unexpected IOSurface format 0x{:x}",
@@ -208,6 +211,9 @@ bool CRendererVTBVisionOS::UploadTexture(int index)
       {0, planes[0].id, GL_RED, &renderBuf.m_eglSurfaceY},
       {1, planes[1].id, GL_RG, &renderBuf.m_eglSurfaceUV},
   };
+  // ANGLE's IOSurface table: (GL_RED|GL_RG, GL_UNSIGNED_BYTE) -> R8/RG8;
+  // (GL_RED|GL_RG, GL_UNSIGNED_SHORT) -> R16_UNORM/RG16_UNORM.
+  const GLint planeType = tenBit ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
 
   for (const PlaneDesc& d : descs)
   {
@@ -226,7 +232,7 @@ bool CRendererVTBVisionOS::UploadTexture(int index)
                               EGL_TEXTURE_INTERNAL_FORMAT_ANGLE,
                               d.internalFormat,
                               EGL_TEXTURE_TYPE_ANGLE,
-                              GL_UNSIGNED_BYTE,
+                              planeType,
                               EGL_NONE};
 
     EGLSurface eglSurface = eglCreatePbufferFromClientBuffer(
@@ -267,6 +273,13 @@ bool CRendererVTBVisionOS::UploadTexture(int index)
   }
 
   glBindTexture(m_textureTarget, 0);
+
+  // Feed the shader the real layout: P010 = 10 significant bits, MSB-aligned
+  // in 16-bit unorm words.  CConvertMatrix's (bits, textureBits) = (10, 16)
+  // applies the 65535/1023 rescale that decodes exactly that alignment — the
+  // same convention Kodi's other P010 hardware paths rely on.
+  buf.m_srcBits = tenBit ? 10 : 8;
+  buf.m_srcTextureBits = tenBit ? 16 : 8;
 
   CalculateTextureSourceRects(index, 3);
   return true;

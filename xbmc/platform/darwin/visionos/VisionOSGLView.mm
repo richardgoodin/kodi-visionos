@@ -118,8 +118,9 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
     NSDictionary* surfProps = @{
       (id)kIOSurfaceWidth : @(3840),
       (id)kIOSurfaceHeight : @(2160),
-      (id)kIOSurfaceBytesPerElement : @(4),
-      (id)kIOSurfacePixelFormat : @((uint32_t)'BGRA'),
+      // EDR TEST: 64RGBAHalf (8 bytes/element) instead of BGRA8.
+      (id)kIOSurfaceBytesPerElement : @(8),
+      (id)kIOSurfacePixelFormat : @((uint32_t)'RGhA'),
     };
     m_renderSurface = IOSurfaceCreate((__bridge CFDictionaryRef)surfProps);
     if (!m_renderSurface)
@@ -337,10 +338,13 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
                             EGL_TEXTURE_2D,
                             EGL_TEXTURE_FORMAT,
                             EGL_TEXTURE_RGBA,
+                            // EDR TEST: ANGLE's IOSurface table maps
+                            // (GL_RGBA, GL_HALF_FLOAT) -> R16G16B16A16_FLOAT
+                            // (IOSurfaceSurfaceMtl.mm line 55).
                             EGL_TEXTURE_INTERNAL_FORMAT_ANGLE,
-                            GL_BGRA_EXT,
+                            GL_RGBA,
                             EGL_TEXTURE_TYPE_ANGLE,
-                            GL_UNSIGNED_BYTE,
+                            GL_HALF_FLOAT,
                             EGL_NONE};
   m_renderPbuffer = eglCreatePbufferFromClientBuffer(
       m_eglDisplay, EGL_IOSURFACE_ANGLE, reinterpret_cast<EGLClientBuffer>(m_renderSurface), cfg,
@@ -414,6 +418,22 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
         ;
       dispatch_semaphore_wait(m_vsyncSem, DISPATCH_TIME_FOREVER);
     }
+
+    // EDR STEP STRIP (temporary): four 200x400 patches, encoded values that
+    // the decode kernel maps to 0.5x / 1x / 2x / 4x linear.  Readout:
+    //   0.5x darker than 1x        = probe + decode plumbing sane
+    //   2x/4x brighter, in steps   = EDR through, headroom measurable
+    //   2x/4x identical to 1x      = clamped OR zero current headroom
+    glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBO);
+    glEnable(GL_SCISSOR_TEST);
+    static const float kSteps[4] = {0.7354f, 1.0f, 1.3533f, 1.8248f};
+    for (int i = 0; i < 4; ++i)
+    {
+      glScissor(i * 200, 0, 200, 400);
+      glClearColor(kSteps[i], kSteps[i], kSteps[i], 1.0f);
+      glClear(GL_COLOR_BUFFER_BIT);
+    }
+    glScissor(0, 0, m_framebufferWidth, m_framebufferHeight);
 
     glFinish();
     // Frame timing (3/3) — after vsync wait + glFinish:

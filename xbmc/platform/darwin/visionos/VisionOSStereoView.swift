@@ -75,6 +75,7 @@ final class StereoBridge {
   private var device: MTLDevice?
   private var queue: MTLCommandQueue?
   private var lowLevel: LowLevelTexture?
+  private var decodePipeline: MTLComputePipelineState?
   // One cached wrap of the render IOSurface (a single fixed allocation),
   // keyed by IOSurfaceID.
   private var srcTextures: [UInt32: MTLTexture] = [:]
@@ -86,6 +87,31 @@ final class StereoBridge {
   var gazeTarget: NSObject?
   private static let gazeSel = NSSelectorFromString("injectGazePhase:x:y:")
   private typealias GazeInjectFn = @convention(c) (NSObject, Selector, Int, Double, Double) -> Void
+
+  /// Presentation decode: the float IOSurface holds EXTENDED-sRGB-ENCODED
+  /// values (Kodi's GUI writes its normal sRGB output; the HDR video path
+  /// will encode linear EDR with the same curve, >1.0 allowed).  This kernel
+  /// is the single decode back to linear — exact piecewise EOTF, so SDR
+  /// content matches the old .bgra8Unorm_srgb view bit-for-bit.
+  private static let decodeKernelSource = """
+  #include <metal_stdlib>
+  using namespace metal;
+
+  static inline float srgbToLinear(float c)
+  {
+    return (c <= 0.04045f) ? c / 12.92f : pow((c + 0.055f) / 1.055f, 2.4f);
+  }
+
+  kernel void srgbDecode(texture2d<float, access::read> src [[texture(0)]],
+                         texture2d<float, access::write> dst [[texture(1)]],
+                         uint2 gid [[thread_position_in_grid]])
+  {
+    if (gid.x >= dst.get_width() || gid.y >= dst.get_height())
+      return;
+    float4 c = src.read(gid);
+    dst.write(float4(srgbToLinear(c.r), srgbToLinear(c.g), srgbToLinear(c.b), c.a), gid);
+  }
+  """
 
   @MainActor
   func sendGaze(phase: Int, x: Double, y: Double) {
@@ -122,11 +148,11 @@ final class StereoBridge {
     do {
       var mat = material
       var desc = LowLevelTexture.Descriptor()
-      // _srgb: the IOSurface holds sRGB-ENCODED bytes (Kodi's GL output).
-      // Sampling them as plain unorm makes RealityKit treat encoded values
-      // as linear and the display pipeline re-encodes — double gamma =
-      // washed-out, over-bright image.  The sRGB view decodes on sample.
-      desc.pixelFormat = .bgra8Unorm_srgb
+      // EDR TEST: half-float end to end.  NOTE no _srgb variant exists for
+      // float formats — Kodi's sRGB-encoded output is sampled as linear, so
+      // the UI looks washed out for the duration of this experiment.  The
+      // only question is whether the >1.0 probe patch beats UI white.
+      desc.pixelFormat = .rgba16Float
       desc.width = kSurfaceWidth
       desc.height = kSurfaceHeight
       // Full mip chain + render-target usage so mips can be generated after
@@ -144,6 +170,20 @@ final class StereoBridge {
       lowLevel = llt
       device = MTLCreateSystemDefaultDevice()
       queue = device?.makeCommandQueue()
+      // Compile the sRGB-decode compute pipeline.  Failure is non-fatal:
+      // drain() falls back to a plain blit (washed-out but alive).
+      do {
+        if let device {
+          let lib = try device.makeLibrary(source: Self.decodeKernelSource, options: nil)
+          if let fn = lib.makeFunction(name: "srgbDecode") {
+            decodePipeline = try device.makeComputePipelineState(function: fn)
+          } else {
+            NSLog("VISIONOS-STEREO: srgbDecode function missing from library")
+          }
+        }
+      } catch {
+        NSLog("VISIONOS-STEREO: decode pipeline FAILED, falling back to blit: \(error)")
+      }
       attached = true
     } catch {
       NSLog("VISIONOS-STEREO: attach FAILED: \(error)")
@@ -164,7 +204,7 @@ final class StereoBridge {
     var src = srcTextures[surfaceID]
     if src == nil {
       let d = MTLTextureDescriptor.texture2DDescriptor(
-          pixelFormat: .bgra8Unorm_srgb,
+          pixelFormat: .rgba16Float, // EDR TEST: matches the 'RGhA' IOSurface
           width: kSurfaceWidth, height: kSurfaceHeight, mipmapped: false)
       d.usage = [.shaderRead]
       src = device.makeTexture(descriptor: d, iosurface: surface, plane: 0)
@@ -175,11 +215,36 @@ final class StereoBridge {
       srcTextures[surfaceID] = src
     }
     guard let src,
-          let cmd = queue.makeCommandBuffer(),
-          let blit = cmd.makeBlitCommandEncoder()
+          let cmd = queue.makeCommandBuffer()
     else { return }
 
     let dst = llt.replace(using: cmd)
+
+    if let pipeline = decodePipeline,
+       let compute = cmd.makeComputeCommandEncoder()
+    {
+      // Decode extended-sRGB -> linear while copying into the LowLevelTexture.
+      compute.setComputePipelineState(pipeline)
+      compute.setTexture(src, index: 0)
+      compute.setTexture(dst, index: 1)
+      let w = pipeline.threadExecutionWidth
+      let h = pipeline.maxTotalThreadsPerThreadgroup / w
+      compute.dispatchThreads(
+          MTLSize(width: kSurfaceWidth, height: kSurfaceHeight, depth: 1),
+          threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
+      compute.endEncoding()
+      if dst.mipmapLevelCount > 1,
+         let blit = cmd.makeBlitCommandEncoder()
+      {
+        blit.generateMipmaps(for: dst)
+        blit.endEncoding()
+      }
+      cmd.commit()
+      return
+    }
+
+    // Fallback: straight blit (no decode).
+    guard let blit = cmd.makeBlitCommandEncoder() else { return }
     blit.copy(from: src,
               sourceSlice: 0, sourceLevel: 0,
               sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
