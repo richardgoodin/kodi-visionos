@@ -67,10 +67,13 @@
   // presentFramebuffer.
   BOOL m_rightEyeDrawn;
 
-  // Presentation-rate sync: a CADisplayLink on the main run loop signals
-  // this semaphore each refresh; presentFramebuffer blocks on it.
+  // Presentation-rate sync: a CADisplayLink on a dedicated high-priority
+  // thread's run loop signals this semaphore each refresh;
+  // presentFramebuffer blocks on it.  (On the MAIN run loop 5-15% of ticks
+  // were dropped under load — measured — jittering frame pacing.)
   dispatch_semaphore_t m_vsyncSem;
   CADisplayLink* m_vsyncLink;
+  NSThread* m_vsyncThread;
 }
 
 @property(readonly) EGLContext eglContext;
@@ -113,6 +116,11 @@
 // blit completion handler (any thread) when RealityKit is done reading the
 // surface with this IOSurfaceID.  Frees that buffer for the producer.
 - (void)releaseSurfaceWithID:(uint32_t)surfaceID;
+
+// Measured display refresh rate from the vsync link (0.0 before the first
+// tick).  Feeds VisionOSDisplayManager getDisplayRate so Kodi's A/V sync
+// runs against the real panel rate (M5: 120 Hz) instead of a hardcoded 90.
+- (double)displayRate;
 
 - (CGFloat)getScreenScale;
 

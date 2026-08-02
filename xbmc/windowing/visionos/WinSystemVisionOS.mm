@@ -86,6 +86,7 @@ struct CADisplayLinkWrapper
 {
   CADisplayLink* impl;
   VisionOSDisplayLinkCallback* callbackClass;
+  NSThread* thread;
 };
 
 void CWinSystemVisionOS::Register()
@@ -319,8 +320,11 @@ void CWinSystemVisionOS::UpdateResolutions()
 
   CDisplaySettings::GetInstance().ClearCustomResolutions();
 
-  // visionOS: add a limited set of refresh rates matching the display capability
-  const std::vector<float> supportedRefreshRates = {24.0f, 25.0f, 30.0f, 60.0f, 90.0f};
+  // visionOS: add a limited set of refresh rates matching the display
+  // capability (M2: 90/96/100; M5: up to 120).  displayRateSwitch is a
+  // no-op — the compositor owns the mode — so these are informational.
+  const std::vector<float> supportedRefreshRates = {24.0f,  25.0f, 30.0f,  60.0f,
+                                                    90.0f,  96.0f, 100.0f, 120.0f};
   for (float refreshRate : supportedRefreshRates)
   {
     RESOLUTION_INFO res;
@@ -416,13 +420,27 @@ bool CWinSystemVisionOS::InitDisplayLink(CVideoSyncVisionOS* syncImpl)
 {
   m_pDisplayLink->callbackClass.videoSyncImpl = syncImpl;
 
-  // Create a CADisplayLink attached to the main run loop.
-  // UIWindowScene.displayLinkWithTarget:selector: is not available on visionOS 1.0;
-  // CADisplayLink with the main run loop is the supported alternative.
-  m_pDisplayLink->impl = [CADisplayLink
-      displayLinkWithTarget:m_pDisplayLink->callbackClass
-                   selector:@selector(runDisplayLink)];
-  [m_pDisplayLink->impl addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+  // Dedicated thread + run loop for the vblank link: on the MAIN run loop
+  // the callback is starved under load (measured 5-15% dropped ticks),
+  // jittering the video reference clock this link drives.  The link is
+  // created on the thread it runs on; DeinitDisplayLink's invalidate
+  // empties the run loop and the thread exits.
+  CADisplayLinkWrapper* wrapper = m_pDisplayLink;
+  VisionOSDisplayLinkCallback* cb = m_pDisplayLink->callbackClass;
+  NSThread* thread = [[NSThread alloc] initWithBlock:^{
+    @autoreleasepool
+    {
+      wrapper->impl = [CADisplayLink displayLinkWithTarget:cb
+                                                  selector:@selector(runDisplayLink)];
+      [wrapper->impl addToRunLoop:[NSRunLoop currentRunLoop]
+                          forMode:NSRunLoopCommonModes];
+      [[NSRunLoop currentRunLoop] run];
+    }
+  }];
+  thread.name = @"Kodi-videosync";
+  thread.qualityOfService = NSQualityOfServiceUserInteractive;
+  m_pDisplayLink->thread = thread;
+  [thread start];
   return true;
 }
 
@@ -434,6 +452,7 @@ void CWinSystemVisionOS::DeinitDisplayLink()
     m_pDisplayLink->impl = nil;
     [m_pDisplayLink->callbackClass SetVideoSyncImpl:nil];
   }
+  m_pDisplayLink->thread = nil;
 }
 
 void CWinSystemVisionOS::PresentRenderImpl(bool rendered)

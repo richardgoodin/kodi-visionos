@@ -12,9 +12,10 @@
 //
 // Kodi renders into 3840x2160 IOSurfaces (VisionOSGLView redirects its FBOs
 // there; the CAMetalLayer is never presented).  MONO: each presented frame's
-// left surface is blitted into the left LowLevelTexture sink, which feeds
-// BOTH eye inputs of the camera-index ShaderGraphMaterial on the display
-// plane.  HARDWAREBASED STEREO: Kodi renders each eye into its own surface,
+// left surface is encoded into the left DrawableQueue sink and explicitly
+// present()ed — RealityKit's designed streaming-texture mechanism — which
+// feeds BOTH eye inputs of the camera-index ShaderGraphMaterial on the
+// display plane.  HARDWAREBASED STEREO: Kodi renders each eye into its own surface,
 // the pair is published together, each sink gets its eye's frame, and the
 // material's rightTexture input is rebound to the right sink (setStereo) —
 // per-eye content in the shared-space window.
@@ -85,11 +86,11 @@ final class StereoBridge {
   // MainActor-only state (created in attach/drain).
   private var device: MTLDevice?
   private var queue: MTLCommandQueue?
-  // One LowLevelTexture sink per eye.  Mono binds the LEFT sink to both
-  // material eye inputs (single blit per frame); stereo rebinds the
+  // One DrawableQueue sink per eye.  Mono binds the LEFT sink to both
+  // material eye inputs (single encode per frame); stereo rebinds the
   // rightTexture parameter to the right sink (setStereo).
-  private var lowLevelLeft: LowLevelTexture?
-  private var lowLevelRight: LowLevelTexture?
+  private var drawableLeft: TextureResource.DrawableQueue?
+  private var drawableRight: TextureResource.DrawableQueue?
   private var leftResource: TextureResource?
   private var rightResource: TextureResource?
   private var material: ShaderGraphMaterial?
@@ -195,38 +196,52 @@ final class StereoBridge {
   }
 
   /// Called once by the view after the ShaderGraphMaterial loads: create
-  /// the per-eye LowLevelTexture sinks, bind the left one to BOTH eyes
-  /// (mono start), put the material on the plane.
+  /// the per-eye DrawableQueue sinks on image-backed placeholder resources,
+  /// bind the left one to BOTH eyes (mono start), put the material on the
+  /// plane.
   @MainActor
-  func attach(material: ShaderGraphMaterial, plane: ModelEntity) {
+  func attach(material: ShaderGraphMaterial, plane: ModelEntity) async {
     do {
       var mat = material
-      var desc = LowLevelTexture.Descriptor()
-      // EDR TEST: half-float end to end.  NOTE no _srgb variant exists for
-      // float formats — Kodi's sRGB-encoded output is sampled as linear, so
-      // the UI looks washed out for the duration of this experiment.  The
-      // only question is whether the >1.0 probe patch beats UI white.
-      desc.pixelFormat = .rgba16Float
-      desc.width = kSurfaceWidth
-      desc.height = kSurfaceHeight
-      // Full mip chain + render-target usage so mips can be generated after
-      // each blit: a mip-less 4K texture sampled linearly aliases/shimmers
-      // under peripheral (foveated) minification; the window server's own
-      // compositing of CAMetalLayer content is properly filtered, which is
-      // why the pre-RealityKit path did not shimmer.
-      desc.mipmapLevelCount = 12
-      desc.textureUsage = [.shaderRead, .shaderWrite, .renderTarget]
-      let lltL = try LowLevelTexture(descriptor: desc)
-      let lltR = try LowLevelTexture(descriptor: desc)
-      let resL = try TextureResource(from: lltL)
-      let resR = try TextureResource(from: lltR)
+      // Per-eye DrawableQueue sinks — RealityKit's designed mechanism for
+      // streaming textures.  Each drained frame is encoded into a drawable
+      // and PRESENTED: the explicit "new frame now" signal the old
+      // LowLevelTexture path lacked (windowed RealityKit only recomposited
+      // while the main run loop happened to be spinning — the display-link
+      // heartbeat hack this replaces).  Half-float end to end (EDR: no
+      // _srgb variant exists for float formats; the compute kernel below
+      // is the decode).  mipmapsMode .allocateAndGenerateAll: RealityKit
+      // generates mips at present — a mip-less 4K texture aliases/shimmers
+      // under peripheral (foveated) minification.
+      let qd = TextureResource.DrawableQueue.Descriptor(
+          pixelFormat: .rgba16Float,
+          width: kSurfaceWidth,
+          height: kSurfaceHeight,
+          usage: [.shaderRead, .shaderWrite, .renderTarget],
+          mipmapsMode: .allocateAndGenerateAll)
+      let queueL = try TextureResource.DrawableQueue(qd)
+      let queueR = try TextureResource.DrawableQueue(qd)
+      // Image-backed placeholder resources; the queues take over on the
+      // first present().  (NOT LowLevelTexture-backed: replace(withDrawables:)
+      // on an LLT resource leaves the queue unserviced — nextDrawable threw
+      // forever, device-observed.)
+      guard let img = Self.makePlaceholderImage() else {
+        NSLog("VISIONOS-STEREO: placeholder image FAILED")
+        return
+      }
+      let resL = try await TextureResource(image: img,
+                                           options: .init(semantic: .color))
+      let resR = try await TextureResource(image: img,
+                                           options: .init(semantic: .color))
+      resL.replace(withDrawables: queueL)
+      resR.replace(withDrawables: queueR)
       // Mono start: the LEFT sink feeds both eyes.  setStereo() rebinds
       // rightTexture to the right sink when stereo frames arrive.
       try mat.setParameter(name: "leftTexture", value: .textureResource(resL))
       try mat.setParameter(name: "rightTexture", value: .textureResource(resL))
       plane.model?.materials = [mat]
-      lowLevelLeft = lltL
-      lowLevelRight = lltR
+      drawableLeft = queueL
+      drawableRight = queueR
       leftResource = resL
       rightResource = resR
       self.material = mat
@@ -238,9 +253,9 @@ final class StereoBridge {
       // drain() falls back to a plain blit (washed-out but alive).
       do {
         if let device {
-          let lib = try device.makeLibrary(source: Self.decodeKernelSource, options: nil)
+          let lib = try await device.makeLibrary(source: Self.decodeKernelSource, options: nil)
           if let fn = lib.makeFunction(name: "srgbDecode") {
-            decodePipeline = try device.makeComputePipelineState(function: fn)
+            decodePipeline = try await device.makeComputePipelineState(function: fn)
           } else {
             NSLog("VISIONOS-STEREO: srgbDecode function missing from library")
           }
@@ -249,9 +264,23 @@ final class StereoBridge {
         NSLog("VISIONOS-STEREO: decode pipeline FAILED, falling back to blit: \(error)")
       }
       attached = true
+      NSLog("VISIONOS-STEREO: DrawableQueue attach OK")
     } catch {
       NSLog("VISIONOS-STEREO: attach FAILED: \(error)")
     }
+  }
+
+  /// 4x4 black placeholder for the pre-first-present material binding.
+  private static func makePlaceholderImage() -> CGImage? {
+    let w = 4, h = 4
+    guard let cs = CGColorSpace(name: CGColorSpace.sRGB),
+          let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
+                              bytesPerRow: 0, space: cs,
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return nil }
+    ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+    return ctx.makeImage()
   }
 
   /// Rebind the material's right-eye input when the stream flips between
@@ -289,11 +318,11 @@ final class StereoBridge {
     return tex
   }
 
-  /// Encode one eye: decode extended-sRGB -> linear into the sink (or a
-  /// plain blit if the pipeline failed to build), then regenerate mips.
+  /// Encode one eye: decode extended-sRGB -> linear into the drawable's
+  /// texture (or a plain blit if the pipeline failed to build).  Mips are
+  /// generated by RealityKit at present (mipmapsMode).
   @MainActor
-  private func encode(cmd: MTLCommandBuffer, src: MTLTexture, into llt: LowLevelTexture) {
-    let dst = llt.replace(using: cmd)
+  private func encode(cmd: MTLCommandBuffer, src: MTLTexture, into dst: MTLTexture) {
     if let pipeline = decodePipeline,
        let compute = cmd.makeComputeCommandEncoder()
     {
@@ -316,16 +345,11 @@ final class StereoBridge {
                 destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
       blit.endEncoding()
     }
-    if dst.mipmapLevelCount > 1,
-       let blit = cmd.makeBlitCommandEncoder()
-    {
-      blit.generateMipmaps(for: dst)
-      blit.endEncoding()
-    }
   }
 
-  /// MainActor: blit the newest published frame (one or both eyes) into
-  /// the LowLevelTexture sinks.  Every taken surface is released — by the
+  /// MainActor: encode the newest published frame (one or both eyes) into
+  /// drawables from the per-eye DrawableQueues and present them.  Every
+  /// taken surface is released — by the
   /// command buffer's completion handler when the encode commits, or
   /// immediately on any path that returns without committing.
   @MainActor
@@ -342,8 +366,8 @@ final class StereoBridge {
     guard attached,
           let device,
           let queue,
-          let lltL = lowLevelLeft,
-          let lltR = lowLevelRight
+          let queueL = drawableLeft,
+          let queueR = drawableRight
     else {
       releaseAll()
       return
@@ -365,6 +389,26 @@ final class StereoBridge {
       }
     }
 
+    // Dequeue the sink drawables up front.  If RealityKit has none free
+    // (compositor behind), drop this frame — coalescing means a newer one
+    // is coming; an obtained-but-unpresented Drawable returns to the pool
+    // when it goes out of scope.
+    let drawL: TextureResource.Drawable
+    do {
+      drawL = try queueL.nextDrawable()
+    } catch {
+      releaseAll()
+      return
+    }
+    var drawR: TextureResource.Drawable?
+    if srcR != nil {
+      drawR = try? queueR.nextDrawable()
+      if drawR == nil {
+        releaseAll()
+        return
+      }
+    }
+
     guard let cmd = queue.makeCommandBuffer() else {
       releaseAll()
       return
@@ -377,11 +421,15 @@ final class StereoBridge {
       if let rightID { self?.sendRelease(rightID) }
     }
 
-    encode(cmd: cmd, src: srcL, into: lltL)
-    if let srcR {
-      encode(cmd: cmd, src: srcR, into: lltR)
+    encode(cmd: cmd, src: srcL, into: drawL.texture)
+    if let srcR, let drawR {
+      encode(cmd: cmd, src: srcR, into: drawR.texture)
     }
     cmd.commit()
+    // Explicit present: the "new frame now" signal to RealityKit — what
+    // makes windowed recompositing happen without any main-loop heartbeat.
+    drawL.present()
+    drawR?.present()
   }
 }
 
@@ -510,7 +558,7 @@ private struct StereoScaffoldView: View {
           let stereoMat = try await ShaderGraphMaterial(
               named: "/Root/StereoTest",
               from: Self.stereoUSDA.data(using: .utf8)!)
-          bridge.attach(material: stereoMat, plane: plane)
+          await bridge.attach(material: stereoMat, plane: plane)
         } catch {
           NSLog("VISIONOS-STEREO: camera-index material FAILED: \(error)")
           var fallback = UnlitMaterial()

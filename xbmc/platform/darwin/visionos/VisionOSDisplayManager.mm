@@ -8,6 +8,8 @@
 
 #import "platform/darwin/visionos/VisionOSDesktop.h"
 #import "platform/darwin/visionos/VisionOSDisplayManager.h"
+#import "platform/darwin/visionos/VisionOSGLView.h"
+#import "platform/darwin/visionos/XBMCController.h"
 
 #include "platform/darwin/visionos/VisionOSLog.h"
 
@@ -41,9 +43,13 @@
 
 - (double)getDisplayRate
 {
-  // visionOS targets 90 Hz.  CADisplayLink will give us the actual rate at
-  // runtime; this default is used during initialisation.
-  // VISIONOS_STAGE2: wire up CADisplayLink and report the measured rate.
+  // Real measured rate from the vsync display link (M5 panel: 120 Hz).
+  // Kodi's A/V sync and frame placement run against this number — the old
+  // hardcoded 90 put 24p scheduling off by a third on a 120 Hz panel.
+  const double measured = [g_xbmcController.glView displayRate];
+  if (measured > 0.0)
+    return measured;
+  // Early init, before the first vsync tick.
   return 90.0;
 }
 

@@ -166,8 +166,19 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
     // blocking): tick at the display's real refresh rate, signal the render
     // thread.
     m_vsyncSem = dispatch_semaphore_create(0);
-    m_vsyncLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(vsyncTick:)];
-    [m_vsyncLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    // Dedicated thread: on the main run loop 5-15% of ticks were dropped
+    // under load (RealityKit blits / SwiftUI share the main thread),
+    // stretching presentFramebuffer's vsync wait to 16.7 ms at random —
+    // visible as intermittent stutter in 24p playback.  The link is
+    // created on the thread it runs on.  (No preferredFrameRateRange
+    // request: the probe showed the M5 panel already runs 120 Hz — an
+    // exact 5x multiple of 24 fps — and ignored a 96 Hz hint.)
+    m_vsyncThread = [[NSThread alloc] initWithTarget:self
+                                            selector:@selector(vsyncThreadMain)
+                                              object:nil];
+    m_vsyncThread.name = @"Kodi-vsync";
+    m_vsyncThread.qualityOfService = NSQualityOfServiceUserInteractive;
+    [m_vsyncThread start];
   }
   return self;
 }
@@ -477,8 +488,45 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
     glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBOs[m_currentEye][m_renderIndex]);
 }
 
+// Dedicated run-loop thread for the vsync display link — the link is the
+// run loop's only source and is never invalidated (the view lives for the
+// app's lifetime).
+- (void)vsyncThreadMain
+{
+  @autoreleasepool
+  {
+    m_vsyncLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(vsyncTick:)];
+    [m_vsyncLink addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
+    [[NSRunLoop currentRunLoop] run];
+  }
+}
+
+// Measured panel refresh rate (0.0 before the first tick).
+- (double)displayRate
+{
+  CADisplayLink* link = m_vsyncLink;
+  if (link && link.duration > 0)
+    return round(1.0 / link.duration);
+  return 0.0;
+}
+
 - (void)vsyncTick:(CADisplayLink*)link
 {
+  // Measured-rate probe, disabled in place (re-enable for display-rate
+  // debugging — prints once a second):
+  // static double lastLog = 0;
+  // static int ticks = 0;
+  // ++ticks;
+  // const double now = CACurrentMediaTime();
+  // if (lastLog == 0)
+  //   lastLog = now;
+  // else if (now - lastLog >= 1.0)
+  // {
+  //   NSLog(@"VISIONOS-VSYNC: %.1f Hz (link duration %.2f ms)", ticks / (now - lastLog),
+  //         (link.targetTimestamp - link.timestamp) * 1000.0);
+  //   ticks = 0;
+  //   lastLog = now;
+  // }
   dispatch_semaphore_signal(m_vsyncSem);
 }
 
