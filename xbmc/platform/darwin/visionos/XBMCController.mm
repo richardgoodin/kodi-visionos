@@ -666,18 +666,31 @@ int KODI_Run(bool renderGUI)
 
 #pragma mark - Stereo presentation
 
-// Render thread.  The presenter's update method only schedules main-actor
-// work, so the call itself is cheap and thread-safe.
-- (void)publishStereoSurface
+// Render thread.  The presenter's update methods only schedule main-actor
+// work, so the call itself is cheap and thread-safe.  Returns YES iff the
+// frame was handed to the presenter — the producer counts one pending
+// release per delivered surface.
+- (BOOL)publishStereoSurface
 {
   id presenter = self.stereoPresenter;
   if (!presenter)
-    return;
-  IOSurfaceRef surface = self.glView.renderSurface;
-  if (!surface)
-    return;
+    return NO;
+  IOSurfaceRef left = self.glView.renderSurface;
+  if (!left)
+    return NO;
+  if (self.glView.rightEyeDrawn)
+  {
+    IOSurfaceRef right = self.glView.renderSurfaceRight;
+    if (right)
+    {
+      ((void (*)(id, SEL, IOSurfaceRef, IOSurfaceRef))objc_msgSend)(
+          presenter, @selector(updateWithLeftIOSurface:right:), left, right);
+      return YES;
+    }
+  }
   ((void (*)(id, SEL, IOSurfaceRef))objc_msgSend)(presenter, @selector(updateWithIOSurface:),
-                                                  surface);
+                                                  left);
+  return YES;
 }
 
 #pragma mark - init/deinit

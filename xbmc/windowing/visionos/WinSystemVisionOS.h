@@ -73,6 +73,11 @@ public:
   bool BeginRender() override;
   bool EndRender() override;
 
+  // Stereo (RealityKit per-eye presentation): advertise HARDWAREBASED and
+  // bind the per-eye render target on each SetStereoView(LEFT/RIGHT) pass.
+  bool SupportsStereo(RenderStereoMode mode) const override;
+  void SetStereoMode(RenderStereoMode mode, RenderStereoView view) override;
+
   void Register(IDispResource* resource) override;
   void Unregister(IDispResource* resource) override;
 

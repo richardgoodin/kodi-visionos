@@ -24,7 +24,10 @@
 // RendererVTBGLES is excluded from the visionOS build (CVOpenGLESTextureCache
 // and the native GLES sync APIs are unavailable on visionOS).
 #include "cores/VideoPlayer/VideoRenderers/HwDecRender/RendererVTBVisionOS.h"
-#include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
+// GLES SW renderer subclass adding the stereo CONF_FLAGS translation the
+// stock GLES renderer lacks (registered as "default" in place of
+// CLinuxRendererGLES below).
+#include "cores/VideoPlayer/VideoRenderers/HwDecRender/LinuxRendererGLESVisionOS.h"
 
 // ANGLE GLES headers — glGetString and friends come from ANGLE, not the
 // unavailable system OpenGL ES framework on visionOS.
@@ -207,7 +210,7 @@ bool CWinSystemVisionOS::CreateNewWindow(const std::string& name,
   CDVDFactoryCodec::ClearHWAccels();
   VTB::CDecoder::Register();
   VIDEOPLAYER::CRendererFactory::ClearRenderer();
-  CLinuxRendererGLES::Register();
+  CLinuxRendererGLESVisionOS::Register();
   CRendererVTBVisionOS::Register();
   VIDEOPLAYER::CProcessInfoIOS::Register();
   RETRO::CRPProcessInfoIOS::Register();
@@ -346,6 +349,31 @@ bool CWinSystemVisionOS::BeginRender()
 bool CWinSystemVisionOS::EndRender()
 {
   return CRenderSystemGLES::EndRender();
+}
+
+bool CWinSystemVisionOS::SupportsStereo(RenderStereoMode mode) const
+{
+  // RealityKit presentation renders each eye into its own full-resolution
+  // IOSurface selected by the camera-index material — advertise HARDWAREBASED
+  // on top of the base modes (OFF / SPLIT_VERTICAL / SPLIT_HORIZONTAL / MONO).
+  if (mode == RenderStereoMode::HARDWAREBASED)
+    return true;
+  return CRenderSystemGLES::SupportsStereo(mode);
+}
+
+void CWinSystemVisionOS::SetStereoMode(RenderStereoMode mode, RenderStereoView view)
+{
+  CRenderSystemGLES::SetStereoMode(mode, view);
+  // HARDWAREBASED: Application::Render runs the full render once per eye,
+  // calling SetStereoView(LEFT) then SetStereoView(RIGHT), which lands here
+  // per pass — bind that eye's render target.  Everything else (including
+  // the SetStereoView(OFF) at frame end and all non-stereo rendering)
+  // draws on the left/mono target.  selectEye only touches GL when the
+  // calling thread holds the EGL context, so stray calls from non-render
+  // threads (e.g. resolution changes) are harmless.
+  const int eye =
+      (mode == RenderStereoMode::HARDWAREBASED && view == RenderStereoView::RIGHT) ? 1 : 0;
+  [g_xbmcController.glView selectEye:eye];
 }
 
 void CWinSystemVisionOS::Register(IDispResource* resource)

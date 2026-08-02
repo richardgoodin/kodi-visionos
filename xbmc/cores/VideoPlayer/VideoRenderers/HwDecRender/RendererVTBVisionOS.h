@@ -8,13 +8,13 @@
 
 #pragma once
 
-#include "cores/VideoPlayer/VideoRenderers/LinuxRendererGLES.h"
+#include "LinuxRendererGLESVisionOS.h"
 
 #include <CoreVideo/CoreVideo.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
-class CRendererVTBVisionOS : public CLinuxRendererGLES
+class CRendererVTBVisionOS : public CLinuxRendererGLESVisionOS
 {
 public:
   CRendererVTBVisionOS() = default;

@@ -72,12 +72,20 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
 @synthesize eglContext = m_eglContext;
 @synthesize eglDisplay = m_eglDisplay;
 @synthesize eglSurface = m_eglSurface;
+@synthesize rightEyeDrawn = m_rightEyeDrawn;
 
 // The buffer just completed — valid between glFinish and the index flip in
 // presentFramebuffer, which is exactly when the publish path reads it.
+// Left eye: also the mono-path surface.
 - (IOSurfaceRef)renderSurface
 {
-  return m_renderSurfaces[m_renderIndex];
+  return m_renderSurfaces[0][m_renderIndex];
+}
+
+// Right-eye counterpart, same slot.
+- (IOSurfaceRef)renderSurfaceRight
+{
+  return m_renderSurfaces[1][m_renderIndex];
 }
 
 // visionOS uses CAMetalLayer as the backing layer for ANGLE
@@ -131,15 +139,28 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
       (id)kIOSurfaceBytesPerElement : @(8),
       (id)kIOSurfacePixelFormat : @((uint32_t)'RGhA'),
     };
+    for (int eye = 0; eye < 2; ++eye)
+    {
+      for (int i = 0; i < 2; ++i)
+      {
+        m_renderSurfaces[eye][i] = IOSurfaceCreate((__bridge CFDictionaryRef)surfProps);
+        if (!m_renderSurfaces[eye][i])
+          VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: IOSurfaceCreate failed (eye {} buffer {})",
+                             eye, i);
+      }
+    }
+    // Per-SLOT release fences (both eyes of a frame share a slot and flip
+    // together), delivery-gated: sems start empty and the dequeue only
+    // waits for surfaces that were actually delivered (m_outstanding) —
+    // see the header comment.
     for (int i = 0; i < 2; ++i)
     {
-      m_renderSurfaces[i] = IOSurfaceCreate((__bridge CFDictionaryRef)surfProps);
-      if (!m_renderSurfaces[i])
-        VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: IOSurfaceCreate failed (buffer {})", i);
-      m_releaseSems[i] = dispatch_semaphore_create(i == 0 ? 0 : 1);
+      m_releaseSems[i] = dispatch_semaphore_create(0);
+      m_outstanding[i] = 0;
     }
     m_renderIndex = 0;
-    m_releaseFenceLive = NO;
+    m_currentEye = 0;
+    m_rightEyeDrawn = NO;
 
     // Presentation-rate sync (replaces eglSwapBuffers' implicit vsync
     // blocking): tick at the display's real refresh rate, signal the render
@@ -297,15 +318,15 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
         eglGetCurrentSurface(EGL_DRAW) != m_eglSurface)
       eglMakeCurrent(m_eglDisplay, m_eglSurface, m_eglSurface, m_eglContext);
 
-    // RealityKit-Mono: first call on the render thread builds the
+    // RealityKit: first call on the render thread builds the
     // IOSurface-backed FBOs (needs a current context, which the main thread
     // deliberately never holds).
-    if (!m_renderFBOs[0] && m_renderSurfaces[0])
+    if (!m_renderFBOs[0][0] && m_renderSurfaces[0][0])
       [self setupRenderTarget];
 
-    if (m_renderFBOs[m_renderIndex])
+    if (m_renderFBOs[m_currentEye][m_renderIndex])
     {
-      glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBOs[m_renderIndex]);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBOs[m_currentEye][m_renderIndex]);
       // Frame timing (1/3), with s_stereoLogSeq at the top of the file:
       // NSLog(@"VISIONOS-STEREO: #%d draw-start %.6f", ++s_stereoLogSeq, CACurrentMediaTime());
     }
@@ -316,11 +337,11 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
   }
 }
 
-// Build the FBOs whose color attachments are the two shared IOSurfaces,
-// using the same ANGLE client-buffer mechanism the VTB renderer uses for
-// decode surfaces — in reverse (render INTO the IOSurface instead of
-// sampling it).  Must run on the render thread with the EGL context
-// current.  All-or-nothing: any failure zeroes both FBOs.
+// Build the FBOs whose color attachments are the shared IOSurfaces (two
+// eyes x two slots), using the same ANGLE client-buffer mechanism the VTB
+// renderer uses for decode surfaces — in reverse (render INTO the
+// IOSurface instead of sampling it).  Must run on the render thread with
+// the EGL context current.  All-or-nothing: any failure zeroes every FBO.
 - (void)setupRenderTarget
 {
   const EGLint cfgAttribs[] = {EGL_SURFACE_TYPE,         EGL_PBUFFER_BIT,
@@ -346,92 +367,114 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
   glBindRenderbuffer(GL_RENDERBUFFER, m_renderDepthRB);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 3840, 2160);
 
-  for (int i = 0; i < 2; ++i)
+  for (int eye = 0; eye < 2; ++eye)
   {
-    const EGLint attribs[] = {EGL_WIDTH,
-                              3840,
-                              EGL_HEIGHT,
-                              2160,
-                              EGL_IOSURFACE_PLANE_ANGLE,
-                              0,
-                              EGL_TEXTURE_TARGET,
-                              EGL_TEXTURE_2D,
-                              EGL_TEXTURE_FORMAT,
-                              EGL_TEXTURE_RGBA,
-                              // EDR: ANGLE's IOSurface table maps
-                              // (GL_RGBA, GL_HALF_FLOAT) -> R16G16B16A16_FLOAT
-                              // (IOSurfaceSurfaceMtl.mm line 55).
-                              EGL_TEXTURE_INTERNAL_FORMAT_ANGLE,
-                              GL_RGBA,
-                              EGL_TEXTURE_TYPE_ANGLE,
-                              GL_HALF_FLOAT,
-                              EGL_NONE};
-    m_renderPbuffers[i] = eglCreatePbufferFromClientBuffer(
-        m_eglDisplay, EGL_IOSURFACE_ANGLE, reinterpret_cast<EGLClientBuffer>(m_renderSurfaces[i]),
-        cfg, attribs);
-    if (m_renderPbuffers[i] == EGL_NO_SURFACE)
+    for (int i = 0; i < 2; ++i)
     {
-      VISIONOS_SHELL_LOG(
-          LOGERROR,
-          "VisionOSGLView: render-target eglCreatePbufferFromClientBuffer failed (buffer {}, 0x{:x})",
-          i, static_cast<unsigned>(eglGetError()));
-      [self teardownRenderTargets];
-      return;
-    }
+      const EGLint attribs[] = {EGL_WIDTH,
+                                3840,
+                                EGL_HEIGHT,
+                                2160,
+                                EGL_IOSURFACE_PLANE_ANGLE,
+                                0,
+                                EGL_TEXTURE_TARGET,
+                                EGL_TEXTURE_2D,
+                                EGL_TEXTURE_FORMAT,
+                                EGL_TEXTURE_RGBA,
+                                // EDR: ANGLE's IOSurface table maps
+                                // (GL_RGBA, GL_HALF_FLOAT) -> R16G16B16A16_FLOAT
+                                // (IOSurfaceSurfaceMtl.mm line 55).
+                                EGL_TEXTURE_INTERNAL_FORMAT_ANGLE,
+                                GL_RGBA,
+                                EGL_TEXTURE_TYPE_ANGLE,
+                                GL_HALF_FLOAT,
+                                EGL_NONE};
+      m_renderPbuffers[eye][i] = eglCreatePbufferFromClientBuffer(
+          m_eglDisplay, EGL_IOSURFACE_ANGLE,
+          reinterpret_cast<EGLClientBuffer>(m_renderSurfaces[eye][i]), cfg, attribs);
+      if (m_renderPbuffers[eye][i] == EGL_NO_SURFACE)
+      {
+        VISIONOS_SHELL_LOG(
+            LOGERROR,
+            "VisionOSGLView: render-target eglCreatePbufferFromClientBuffer failed (eye {} buffer {}, 0x{:x})",
+            eye, i, static_cast<unsigned>(eglGetError()));
+        [self teardownRenderTargets];
+        return;
+      }
 
-    glGenTextures(1, &m_renderTextures[i]);
-    glBindTexture(GL_TEXTURE_2D, m_renderTextures[i]);
-    if (!eglBindTexImage(m_eglDisplay, m_renderPbuffers[i], EGL_BACK_BUFFER))
-    {
-      VISIONOS_SHELL_LOG(LOGERROR,
-                         "VisionOSGLView: render-target eglBindTexImage failed (buffer {}, 0x{:x})",
-                         i, static_cast<unsigned>(eglGetError()));
-      [self teardownRenderTargets];
-      return;
-    }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D, 0);
+      glGenTextures(1, &m_renderTextures[eye][i]);
+      glBindTexture(GL_TEXTURE_2D, m_renderTextures[eye][i]);
+      if (!eglBindTexImage(m_eglDisplay, m_renderPbuffers[eye][i], EGL_BACK_BUFFER))
+      {
+        VISIONOS_SHELL_LOG(
+            LOGERROR,
+            "VisionOSGLView: render-target eglBindTexImage failed (eye {} buffer {}, 0x{:x})", eye,
+            i, static_cast<unsigned>(eglGetError()));
+        [self teardownRenderTargets];
+        return;
+      }
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindTexture(GL_TEXTURE_2D, 0);
 
-    glGenFramebuffers(1, &m_renderFBOs[i]);
-    glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBOs[i]);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                           m_renderTextures[i], 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
-                              m_renderDepthRB);
+      glGenFramebuffers(1, &m_renderFBOs[eye][i]);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBOs[eye][i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                             m_renderTextures[eye][i], 0);
+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
+                                m_renderDepthRB);
 
-    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (status != GL_FRAMEBUFFER_COMPLETE)
-    {
-      VISIONOS_SHELL_LOG(LOGERROR, "VisionOSGLView: render-target FBO {} incomplete (0x{:x})", i,
-                         static_cast<unsigned>(status));
-      [self teardownRenderTargets];
-      return;
+      const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+      if (status != GL_FRAMEBUFFER_COMPLETE)
+      {
+        VISIONOS_SHELL_LOG(LOGERROR,
+                           "VisionOSGLView: render-target FBO eye {} slot {} incomplete (0x{:x})",
+                           eye, i, static_cast<unsigned>(status));
+        [self teardownRenderTargets];
+        return;
+      }
     }
   }
 }
 
-// Failure path for setupRenderTarget: return to the no-FBO state (both
+// Failure path for setupRenderTarget: return to the no-FBO state (all
 // zero) so setFramebuffer falls back to the default framebuffer.
 - (void)teardownRenderTargets
 {
-  for (int i = 0; i < 2; ++i)
+  for (int eye = 0; eye < 2; ++eye)
   {
-    if (m_renderFBOs[i])
-      glDeleteFramebuffers(1, &m_renderFBOs[i]);
-    m_renderFBOs[i] = 0;
-    if (m_renderTextures[i])
-      glDeleteTextures(1, &m_renderTextures[i]);
-    m_renderTextures[i] = 0;
-    if (m_renderPbuffers[i] != EGL_NO_SURFACE)
-      eglDestroySurface(m_eglDisplay, m_renderPbuffers[i]);
-    m_renderPbuffers[i] = EGL_NO_SURFACE;
+    for (int i = 0; i < 2; ++i)
+    {
+      if (m_renderFBOs[eye][i])
+        glDeleteFramebuffers(1, &m_renderFBOs[eye][i]);
+      m_renderFBOs[eye][i] = 0;
+      if (m_renderTextures[eye][i])
+        glDeleteTextures(1, &m_renderTextures[eye][i]);
+      m_renderTextures[eye][i] = 0;
+      if (m_renderPbuffers[eye][i] != EGL_NO_SURFACE)
+        eglDestroySurface(m_eglDisplay, m_renderPbuffers[eye][i]);
+      m_renderPbuffers[eye][i] = EGL_NO_SURFACE;
+    }
   }
   if (m_renderDepthRB)
     glDeleteRenderbuffers(1, &m_renderDepthRB);
   m_renderDepthRB = 0;
+}
+
+// HARDWAREBASED stereo eye selection — render thread only (called from
+// CWinSystemVisionOS::SetStereoMode during the per-eye passes).  Rebinds
+// the FBO immediately: SetStereoView runs between BeginRender's
+// setFramebuffer and the pass's draw calls, so the bind must not wait for
+// the next setFramebuffer.
+- (void)selectEye:(int)eye
+{
+  m_currentEye = (eye == 1) ? 1 : 0;
+  if (m_currentEye == 1)
+    m_rightEyeDrawn = YES;
+  if (m_renderFBOs[m_currentEye][m_renderIndex] && eglGetCurrentContext() == m_eglContext)
+    glBindFramebuffer(GL_FRAMEBUFFER, m_renderFBOs[m_currentEye][m_renderIndex]);
 }
 
 - (void)vsyncTick:(CADisplayLink*)link
@@ -444,7 +487,7 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
   if (m_eglDisplay == EGL_NO_DISPLAY || m_eglSurface == EGL_NO_SURFACE)
     return false;
 
-  if (m_renderFBOs[m_renderIndex])
+  if (m_renderFBOs[0][m_renderIndex])
   {
     // Frame timing (2/3) — CPU draw complete, before the vsync wait:
     // NSLog(@"VISIONOS-STEREO: #%d draw-done %.6f", ++s_stereoLogSeq, CACurrentMediaTime());
@@ -465,25 +508,37 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
     // Frame timing (3/3) — after vsync wait + glFinish:
     // NSLog(@"VISIONOS-STEREO: #%d draw-end %.6f", ++s_stereoLogSeq, CACurrentMediaTime());
 
-    // Publish the completed buffer (renderSurface getter returns the
-    // current index), then dequeue the other one for the next frame.
-    [g_xbmcController publishStereoSurface];
+    // Publish the completed frame (renderSurface/renderSurfaceRight
+    // getters return the current slot; the pair goes out together when the
+    // right eye was drawn), then dequeue the other slot for the next
+    // frame.  Count one pending release per surface the presenter actually
+    // took.
+    const BOOL delivered = [g_xbmcController publishStereoSurface];
+    if (delivered)
+      m_outstanding[m_renderIndex] += m_rightEyeDrawn ? 2 : 1;
 
     const int next = m_renderIndex ^ 1;
-    if (m_releaseFenceLive)
+    // BufferQueue dequeue: collect the consumer's releases for every
+    // surface of the target slot still outstanding.  With two slots and a
+    // ~2 ms blit these are almost always already signaled; they block only
+    // when the main actor is a full frame behind — backpressure instead of
+    // corruption.  Bounded so a broken release path degrades (with a log)
+    // instead of hanging.
+    while (m_outstanding[next] > 0)
     {
-      // BufferQueue dequeue: wait for the consumer's release of the target
-      // buffer.  With two buffers and a ~2 ms blit this is almost always
-      // already signaled; it blocks only when the main actor is a full
-      // frame behind — backpressure instead of corruption.  Bounded so a
-      // broken release path degrades (with a log) instead of hanging.
       if (dispatch_semaphore_wait(m_releaseSems[next],
                                   dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC)) != 0)
+      {
         VISIONOS_SHELL_LOG(LOGWARNING,
-                           "VisionOSGLView: release fence timeout on buffer {} — proceeding",
-                           next);
+                           "VisionOSGLView: release fence timeout on slot {} ({} outstanding) — proceeding",
+                           next, m_outstanding[next]);
+        m_outstanding[next] = 0;
+        break;
+      }
+      --m_outstanding[next];
     }
     m_renderIndex = next;
+    m_rightEyeDrawn = NO;
     return true;
   }
 
@@ -491,17 +546,19 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
 }
 
 // BufferQueue releaseBuffer: the Swift blit's GPU-completion handler ends
-// up here (any thread).  Also arms the fence on first use — before the
-// RealityKit side attaches, no releases flow and the dequeue must not wait.
+// up here (any thread).  Both eyes of a slot signal the same per-slot sem
+// — the dequeue knows how many signals to collect (m_outstanding).
 - (void)releaseSurfaceWithID:(uint32_t)surfaceID
 {
-  for (int i = 0; i < 2; ++i)
+  for (int eye = 0; eye < 2; ++eye)
   {
-    if (m_renderSurfaces[i] && IOSurfaceGetID(m_renderSurfaces[i]) == surfaceID)
+    for (int i = 0; i < 2; ++i)
     {
-      m_releaseFenceLive = YES;
-      dispatch_semaphore_signal(m_releaseSems[i]);
-      return;
+      if (m_renderSurfaces[eye][i] && IOSurfaceGetID(m_renderSurfaces[eye][i]) == surfaceID)
+      {
+        dispatch_semaphore_signal(m_releaseSems[i]);
+        return;
+      }
     }
   }
   VISIONOS_SHELL_LOG(LOGWARNING, "VisionOSGLView: release for unknown IOSurfaceID {}", surfaceID);

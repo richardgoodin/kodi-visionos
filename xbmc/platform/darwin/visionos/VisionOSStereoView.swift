@@ -10,18 +10,19 @@
 // Windowed stereo presentation for the visionOS Kodi port (RealityKit
 // camera-index route — shared-space window preserved; no immersive space).
 //
-// CURRENT STATE — "RealityKit Mono": Kodi renders into a 3840x2160 IOSurface
-// (VisionOSGLView redirects its FBO there; the CAMetalLayer is no longer
-// presented).  Each presented frame is published here, blitted into a
-// LowLevelTexture, and sampled by BOTH eye inputs of the camera-index
-// ShaderGraphMaterial on the display plane.  If UI + input + video all work
-// through this path, it gets committed as "RealityKit Mono"; stereo is then
-// a second surface + the left/right parameters diverging.
+// Kodi renders into 3840x2160 IOSurfaces (VisionOSGLView redirects its FBOs
+// there; the CAMetalLayer is never presented).  MONO: each presented frame's
+// left surface is blitted into the left LowLevelTexture sink, which feeds
+// BOTH eye inputs of the camera-index ShaderGraphMaterial on the display
+// plane.  HARDWAREBASED STEREO: Kodi renders each eye into its own surface,
+// the pair is published together, each sink gets its eye's frame, and the
+// material's rightTexture input is rebound to the right sink (setStereo) —
+// per-eye content in the shared-space window.
 //
-// Proven earlier on this ladder: RealityKit hosting in the UIKit window,
-// camera-index per-eye material selection (red-left/blue-right on device),
-// textures through the switch, frozen plane constants (1360 pt/m; glass at
-// z = -270/1360).
+// Proven on device: RealityKit hosting in the UIKit window, camera-index
+// per-eye material selection, live IOSurface feed with BufferQueue release
+// fences, frozen plane constants (1360 pt/m; glass at z = -270/1360), EDR
+// output through the extended-sRGB float chain, FSBS 3D playback.
 // =============================================================================
 
 import Foundation
@@ -52,9 +53,16 @@ public class VisionOSStereoPresenter: NSObject {
     return vc
   }
 
-  /// Render thread.  Only records the surface and schedules main-actor work.
+  /// Render thread, mono frame.  Only records the surface and schedules
+  /// main-actor work.
   @objc public func update(withIOSurface surface: IOSurfaceRef) {
-    bridge.submit(surface)
+    bridge.submit(left: surface, right: nil)
+  }
+
+  /// Render thread, HARDWAREBASED stereo frame: both eyes of one frame,
+  /// published together.
+  @objc public func update(withLeftIOSurface left: IOSurfaceRef, right: IOSurfaceRef) {
+    bridge.submit(left: left, right: right)
   }
 
   /// The object receiving injected gaze phases (the VisionOSGLView), set by
@@ -69,15 +77,27 @@ public class VisionOSStereoPresenter: NSObject {
 final class StereoBridge {
 
   private let lock = NSLock()
-  private var pendingSurface: IOSurfaceRef?
+  // Coalesced pending frame: left surface always, right surface only for
+  // HARDWAREBASED stereo frames.
+  private var pendingLeft: IOSurfaceRef?
+  private var pendingRight: IOSurfaceRef?
 
   // MainActor-only state (created in attach/drain).
   private var device: MTLDevice?
   private var queue: MTLCommandQueue?
-  private var lowLevel: LowLevelTexture?
+  // One LowLevelTexture sink per eye.  Mono binds the LEFT sink to both
+  // material eye inputs (single blit per frame); stereo rebinds the
+  // rightTexture parameter to the right sink (setStereo).
+  private var lowLevelLeft: LowLevelTexture?
+  private var lowLevelRight: LowLevelTexture?
+  private var leftResource: TextureResource?
+  private var rightResource: TextureResource?
+  private var material: ShaderGraphMaterial?
+  private var plane: ModelEntity?
+  private var stereoBound = false
   private var decodePipeline: MTLComputePipelineState?
-  // One cached wrap per render IOSurface (two fixed allocations — the
-  // producer's two-slot BufferQueue), keyed by IOSurfaceID.
+  // One cached wrap per render IOSurface (up to four fixed allocations —
+  // the producer's two eyes x two BufferQueue slots), keyed by IOSurfaceID.
   private var srcTextures: [UInt32: MTLTexture] = [:]
   private var attached = false
 
@@ -141,35 +161,42 @@ final class StereoBridge {
     fn(target, Self.gazeSel, phase, x, y)
   }
 
-  /// Render thread: coalesce to the newest surface and poke the main actor.
-  /// A replaced (never-to-be-read) surface is released immediately.
-  func submit(_ surface: IOSurfaceRef) {
-    var dropped: IOSurfaceRef?
+  /// Render thread: coalesce to the newest frame and poke the main actor.
+  /// Replaced (never-to-be-read) surfaces are released immediately.
+  func submit(left: IOSurfaceRef, right: IOSurfaceRef?) {
+    var dropped: [IOSurfaceRef] = []
     lock.lock()
-    if let old = pendingSurface, IOSurfaceGetID(old) != IOSurfaceGetID(surface) {
-      dropped = old
+    if let old = pendingLeft, IOSurfaceGetID(old) != IOSurfaceGetID(left) {
+      dropped.append(old)
     }
-    pendingSurface = surface
+    if let oldRight = pendingRight,
+       right == nil || IOSurfaceGetID(oldRight) != IOSurfaceGetID(right!) {
+      dropped.append(oldRight)
+    }
+    pendingLeft = left
+    pendingRight = right
     lock.unlock()
-    if let dropped {
-      sendRelease(IOSurfaceGetID(dropped))
+    for d in dropped {
+      sendRelease(IOSurfaceGetID(d))
     }
     Task { @MainActor in
       self.drain()
     }
   }
 
-  private func takePending() -> IOSurfaceRef? {
+  private func takePending() -> (left: IOSurfaceRef, right: IOSurfaceRef?)? {
     lock.lock()
     defer { lock.unlock() }
-    let s = pendingSurface
-    pendingSurface = nil
-    return s
+    guard let left = pendingLeft else { return nil }
+    let right = pendingRight
+    pendingLeft = nil
+    pendingRight = nil
+    return (left, right)
   }
 
-  /// Called once by the view after the ShaderGraphMaterial loads: create the
-  /// LowLevelTexture sink, bind it to BOTH eyes (mono), put the material on
-  /// the plane.
+  /// Called once by the view after the ShaderGraphMaterial loads: create
+  /// the per-eye LowLevelTexture sinks, bind the left one to BOTH eyes
+  /// (mono start), put the material on the plane.
   @MainActor
   func attach(material: ShaderGraphMaterial, plane: ModelEntity) {
     do {
@@ -189,12 +216,22 @@ final class StereoBridge {
       // why the pre-RealityKit path did not shimmer.
       desc.mipmapLevelCount = 12
       desc.textureUsage = [.shaderRead, .shaderWrite, .renderTarget]
-      let llt = try LowLevelTexture(descriptor: desc)
-      let resource = try TextureResource(from: llt)
-      try mat.setParameter(name: "leftTexture", value: .textureResource(resource))
-      try mat.setParameter(name: "rightTexture", value: .textureResource(resource))
+      let lltL = try LowLevelTexture(descriptor: desc)
+      let lltR = try LowLevelTexture(descriptor: desc)
+      let resL = try TextureResource(from: lltL)
+      let resR = try TextureResource(from: lltR)
+      // Mono start: the LEFT sink feeds both eyes.  setStereo() rebinds
+      // rightTexture to the right sink when stereo frames arrive.
+      try mat.setParameter(name: "leftTexture", value: .textureResource(resL))
+      try mat.setParameter(name: "rightTexture", value: .textureResource(resL))
       plane.model?.materials = [mat]
-      lowLevel = llt
+      lowLevelLeft = lltL
+      lowLevelRight = lltR
+      leftResource = resL
+      rightResource = resR
+      self.material = mat
+      self.plane = plane
+      stereoBound = false
       device = MTLCreateSystemDefaultDevice()
       queue = device?.makeCommandQueue()
       // Compile the sRGB-decode compute pipeline.  Failure is non-fatal:
@@ -217,57 +254,49 @@ final class StereoBridge {
     }
   }
 
-  /// MainActor: blit the newest published frame into the LowLevelTexture.
-  /// Every taken surface is released — by the command buffer's completion
-  /// handler when the blit commits, or immediately on any path that
-  /// returns without committing.
+  /// Rebind the material's right-eye input when the stream flips between
+  /// mono (left sink on both eyes) and stereo (own sink per eye).  Rare —
+  /// only on playback stereo-mode transitions.
   @MainActor
-  func drain() {
-    guard let surface = takePending() else { return }
-    let surfaceID = IOSurfaceGetID(surface)
-
-    guard attached,
-          let device,
-          let queue,
-          let llt = lowLevel
-    else {
-      sendRelease(surfaceID)
-      return
+  private func setStereo(_ stereo: Bool) {
+    guard stereo != stereoBound, var mat = material, let plane,
+          let resL = leftResource, let resR = rightResource
+    else { return }
+    do {
+      try mat.setParameter(name: "rightTexture",
+                           value: .textureResource(stereo ? resR : resL))
+      plane.model?.materials = [mat]
+      material = mat
+      stereoBound = stereo
+    } catch {
+      NSLog("VISIONOS-STEREO: right-eye rebind FAILED: \(error)")
     }
+  }
 
-    var src = srcTextures[surfaceID]
-    if src == nil {
-      let d = MTLTextureDescriptor.texture2DDescriptor(
-          pixelFormat: .rgba16Float, // EDR: matches the 'RGhA' IOSurfaces
-          width: kSurfaceWidth, height: kSurfaceHeight, mipmapped: false)
-      d.usage = [.shaderRead]
-      src = device.makeTexture(descriptor: d, iosurface: surface, plane: 0)
-      if src == nil {
-        NSLog("VISIONOS-STEREO: IOSurface -> MTLTexture wrap FAILED")
-        sendRelease(surfaceID)
-        return
-      }
-      srcTextures[surfaceID] = src
+  /// Cached IOSurface -> MTLTexture wrap (fixed producer allocations).
+  @MainActor
+  private func wrap(_ surface: IOSurfaceRef, id: UInt32, device: MTLDevice) -> MTLTexture? {
+    if let cached = srcTextures[id] { return cached }
+    let d = MTLTextureDescriptor.texture2DDescriptor(
+        pixelFormat: .rgba16Float, // EDR: matches the 'RGhA' IOSurfaces
+        width: kSurfaceWidth, height: kSurfaceHeight, mipmapped: false)
+    d.usage = [.shaderRead]
+    guard let tex = device.makeTexture(descriptor: d, iosurface: surface, plane: 0) else {
+      NSLog("VISIONOS-STEREO: IOSurface -> MTLTexture wrap FAILED")
+      return nil
     }
-    guard let src,
-          let cmd = queue.makeCommandBuffer()
-    else {
-      sendRelease(surfaceID)
-      return
-    }
+    srcTextures[id] = tex
+    return tex
+  }
 
-    // Release fence: fires on GPU completion of the read — the moment the
-    // producer may write this surface again.
-    cmd.addCompletedHandler { [weak self] _ in
-      self?.sendRelease(surfaceID)
-    }
-
+  /// Encode one eye: decode extended-sRGB -> linear into the sink (or a
+  /// plain blit if the pipeline failed to build), then regenerate mips.
+  @MainActor
+  private func encode(cmd: MTLCommandBuffer, src: MTLTexture, into llt: LowLevelTexture) {
     let dst = llt.replace(using: cmd)
-
     if let pipeline = decodePipeline,
        let compute = cmd.makeComputeCommandEncoder()
     {
-      // Decode extended-sRGB -> linear while copying into the LowLevelTexture.
       compute.setComputePipelineState(pipeline)
       compute.setTexture(src, index: 0)
       compute.setTexture(dst, index: 1)
@@ -277,33 +306,81 @@ final class StereoBridge {
           MTLSize(width: kSurfaceWidth, height: kSurfaceHeight, depth: 1),
           threadsPerThreadgroup: MTLSize(width: w, height: h, depth: 1))
       compute.endEncoding()
-      if dst.mipmapLevelCount > 1,
-         let blit = cmd.makeBlitCommandEncoder()
-      {
-        blit.generateMipmaps(for: dst)
-        blit.endEncoding()
-      }
-      cmd.commit()
+    } else if let blit = cmd.makeBlitCommandEncoder() {
+      blit.copy(from: src,
+                sourceSlice: 0, sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                sourceSize: MTLSize(width: kSurfaceWidth, height: kSurfaceHeight, depth: 1),
+                to: dst,
+                destinationSlice: 0, destinationLevel: 0,
+                destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
+      blit.endEncoding()
+    }
+    if dst.mipmapLevelCount > 1,
+       let blit = cmd.makeBlitCommandEncoder()
+    {
+      blit.generateMipmaps(for: dst)
+      blit.endEncoding()
+    }
+  }
+
+  /// MainActor: blit the newest published frame (one or both eyes) into
+  /// the LowLevelTexture sinks.  Every taken surface is released — by the
+  /// command buffer's completion handler when the encode commits, or
+  /// immediately on any path that returns without committing.
+  @MainActor
+  func drain() {
+    guard let frame = takePending() else { return }
+    let leftID = IOSurfaceGetID(frame.left)
+    let rightID = frame.right.map { IOSurfaceGetID($0) }
+
+    func releaseAll() {
+      sendRelease(leftID)
+      if let rightID { sendRelease(rightID) }
+    }
+
+    guard attached,
+          let device,
+          let queue,
+          let lltL = lowLevelLeft,
+          let lltR = lowLevelRight
+    else {
+      releaseAll()
       return
     }
 
-    // Fallback: straight blit (no decode).
-    guard let blit = cmd.makeBlitCommandEncoder() else {
-      // Never committed — the completion handler will not fire.
-      sendRelease(surfaceID)
+    // Keep the right-eye binding in step with the stream.
+    setStereo(frame.right != nil)
+
+    guard let srcL = wrap(frame.left, id: leftID, device: device) else {
+      releaseAll()
       return
     }
-    blit.copy(from: src,
-              sourceSlice: 0, sourceLevel: 0,
-              sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-              sourceSize: MTLSize(width: kSurfaceWidth, height: kSurfaceHeight, depth: 1),
-              to: dst,
-              destinationSlice: 0, destinationLevel: 0,
-              destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
-    if dst.mipmapLevelCount > 1 {
-      blit.generateMipmaps(for: dst)
+    var srcR: MTLTexture?
+    if let right = frame.right {
+      srcR = wrap(right, id: rightID!, device: device)
+      if srcR == nil {
+        releaseAll()
+        return
+      }
     }
-    blit.endEncoding()
+
+    guard let cmd = queue.makeCommandBuffer() else {
+      releaseAll()
+      return
+    }
+
+    // Release fence: fires on GPU completion of the read — the moment the
+    // producer may write these surfaces again.
+    cmd.addCompletedHandler { [weak self] _ in
+      self?.sendRelease(leftID)
+      if let rightID { self?.sendRelease(rightID) }
+    }
+
+    encode(cmd: cmd, src: srcL, into: lltL)
+    if let srcR {
+      encode(cmd: cmd, src: srcR, into: lltR)
+    }
     cmd.commit()
   }
 }

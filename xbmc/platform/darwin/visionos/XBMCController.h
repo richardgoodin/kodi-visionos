@@ -78,9 +78,12 @@ class CFileItem;
 
 - (EGLContext)getEGLContextObj;
 
-// Called from the render thread after each finished frame: hands the shared
-// render IOSurface to the RealityKit stereo presenter for display.
-- (void)publishStereoSurface;
+// Called from the render thread after each finished frame: hands the
+// render IOSurface(s) to the RealityKit stereo presenter for display —
+// the left surface alone (mono), or the left/right pair when the frame
+// was rendered in HARDWAREBASED stereo.  Returns YES iff the presenter
+// took the frame (drives the producer's release-fence accounting).
+- (BOOL)publishStereoSurface;
 
 @end
 
