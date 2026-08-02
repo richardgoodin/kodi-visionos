@@ -345,6 +345,12 @@ static XBMCKey XBMCKeyFromUIPress(UIPress* press)
       [presenter setValue:self.glView forKey:@"gazeTarget"];
       [self.glView addSubview:vc.view];
       [vc didMoveToParentViewController:self];
+      // Reclaim first responder from the SwiftUI hosting view.  UIKeyInput
+      // (insertText:) fires only on the actual first responder, unlike
+      // pressesBegan: which bubbles up the responder chain — so without this,
+      // arrow keys keep working after the embed but letter keys (text entry
+      // and shortcuts like C) go dead.
+      [self becomeFirstResponder];
     });
   });
 }
@@ -365,6 +371,15 @@ static XBMCKey XBMCKeyFromUIPress(UIPress* press)
 - (BOOL)canBecomeFirstResponder
 {
   return YES;
+}
+
+// Refuse to resign: the SwiftUI hosting view (RealityKit plane) tries to
+// take first responder after gesture/focus activity, which kills UIKeyInput
+// (letters/text) while pressesBegan: (arrows) keeps bubbling.  Nothing else
+// in the app needs first responder — Kodi's soft keyboard is engine-rendered.
+- (BOOL)canResignFirstResponder
+{
+  return NO;
 }
 
 #pragma mark - FrameBuffer
