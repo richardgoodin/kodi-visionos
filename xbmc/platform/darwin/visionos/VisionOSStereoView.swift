@@ -443,8 +443,12 @@ private struct StereoScaffoldView: View {
 
   /// Hand-authored camera-index material (node IDs verified against
   /// ShaderGraphCoder's emitter).  Each eye samples its own texture input
-  /// through a shared UV node; mono input is a green constant (diagnostic);
-  /// sampler defaults magenta/yellow flag "switch OK, texture unbound".
+  /// through a shared UV node; the mono input ALSO connects to the left
+  /// sampler — mono-camera renders (the system's suspension snapshot of the
+  /// window, previews) must show real content, not a diagnostic color: a
+  /// green mono constant here was the "solid green rectangle" seen after
+  /// leaving the app suspended overnight.  Sampler defaults magenta/yellow
+  /// flag "switch OK, texture unbound".
   static let stereoUSDA = """
   #usda 1.0
   (
@@ -476,7 +480,7 @@ private struct StereoScaffoldView: View {
           def Shader "EyeSwitch"
           {
               uniform token info:id = "ND_realitykit_geometry_switch_cameraindex_color3"
-              color3f inputs:mono = (0, 1, 0)
+              color3f inputs:mono.connect = </Root/StereoTest/LeftSample.outputs:out>
               color3f inputs:left.connect = </Root/StereoTest/LeftSample.outputs:out>
               color3f inputs:right.connect = </Root/StereoTest/RightSample.outputs:out>
               color3f outputs:out
