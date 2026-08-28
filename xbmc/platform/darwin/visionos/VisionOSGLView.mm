@@ -40,7 +40,7 @@ namespace
 
 // A pinch must be held this long, without movement, before it counts as a
 // press. Enter is not sent until it expires, so a drag can still cancel it.
-constexpr NSTimeInterval GAZE_ARM_DELAY = 0.25;
+constexpr NSTimeInterval GAZE_ARM_DELAY = 0.50; // Apple long-press: 0.5 s stationary commits to hold; movement before then cancels
 
 // Delay after arming before a second KEYDOWN is sent. Must EXCEED Kodi
 // KEYBOARD::KEY_HOLD_TRESHOLD (250ms), or CKeyboardStat::TranslateKey never
@@ -48,7 +48,7 @@ constexpr NSTimeInterval GAZE_ARM_DELAY = 0.25;
 constexpr NSTimeInterval GAZE_HOLD_REPEAT_DELAY = 0.26;
 
 // Minimum travel, in fixed-desktop points, before a pinch counts as a drag.
-constexpr CGFloat GAZE_DRAG_THRESHOLD = 40.0;
+constexpr CGFloat GAZE_DRAG_THRESHOLD = 12.0; // Apple-style movement allowance; direction resolved on release, so this only detects motion
 
 // Minor/major axis ratio above which a drag is too diagonal to resolve.
 // 0.5 is +/- 27 degrees from an axis.
@@ -623,7 +623,7 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
 {
   self.gazeArmTimer = nil;
   self.gazeEnterDown = YES;
-  VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze press armed, Enter down");
+  VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze hold begun (stationary 0.5s), Enter down");
   [g_xbmcController sendKeyDown:XBMCK_RETURN];
   self.gazeHoldTimer = [NSTimer scheduledTimerWithTimeInterval:GAZE_HOLD_REPEAT_DELAY target:self selector:@selector(gazeHoldFired:) userInfo:nil repeats:NO];
 }
