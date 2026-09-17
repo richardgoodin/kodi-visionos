@@ -1,9 +1,13 @@
 # ANGLE commit pinned for visionOS port.
 # Pinned to a recent tip-of-tree main commit.
+# 2026-09-15: bumped from 5f0e7940 (2026-05-02, clang llvmorg-23-init-10931)
+# to main head, to pick up the Chromium clang/lld that understands the
+# arm64e.x1 slices in the Xcode 27 SDK .tbd stubs (older ld64.lld rejected
+# every system .tbd as "malformed file: unknown architecture").
 # Source is fetched via gclient (not a tarball) so that dotfiles
 # (.gn, the gn build-root marker) and sub-repos are preserved.
 # Update ANGLE_COMMIT when bumping; verify against:
 #   https://chromium.googlesource.com/angle/angle/+/refs/heads/main
 LIBNAME=angle
-ANGLE_COMMIT=5f0e794041ecec196ea148d3ee08db5ed4c2fc02
+ANGLE_COMMIT=4b7308a36376199c095ccb0ab69b773daa8b9fbe
 BYPRODUCT=libEGL.a

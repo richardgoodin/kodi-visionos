@@ -7,6 +7,15 @@ CONFIGURE=./configure --prefix=$(NATIVEPREFIX) \
                       --disable-framework \
                       --without-pymalloc
 
+# macOS 27 SDK (Xcode 27) declares dup3()/pipe2() for the first time, so
+# configure detects them, but the native build's deployment target is the
+# running OS (26.x) and clang rejects the calls with
+# -Werror,-Wunguarded-availability-new.  Tell configure they are absent so
+# Python keeps its dup2()/pipe() fallbacks.
+ifeq ($(NATIVE_OS), osx)
+  CONFIGURE += ac_cv_func_dup3=no ac_cv_func_pipe2=no
+endif
+
 ifeq ($(OS),linux)
   CONFIGURE += --with-system-expat
 endif

@@ -534,7 +534,7 @@ case $host in
           darwin_embedded)
             # visionOS ships as a separate SDK; its versioning starts at 1.0.
             if test "$use_platform" = "visionos"; then
-              target_minver="1.0"
+              target_minver="27.0"
             else
               target_minver="12.0"
             fi
