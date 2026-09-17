@@ -31,6 +31,24 @@
   </array>
   <!-- Request permission to use microphone if voice input is ever added -->
   <!-- NSMicrophoneUsageDescription - add when needed -->
+  <!-- UIScene lifecycle is mandatory for apps built with the 27 SDK (TN3187) -->
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
+    <key>UISceneConfigurations</key>
+    <dict>
+      <key>UIWindowSceneSessionRoleApplication</key>
+      <array>
+        <dict>
+          <key>UISceneConfigurationName</key>
+          <string>Default Configuration</string>
+          <key>UISceneDelegateClassName</key>
+          <string>XBMCSceneDelegate</string>
+        </dict>
+      </array>
+    </dict>
+  </dict>
   <key>UIRequiredDeviceCapabilities</key>
   <array>
     <string>arm64</string>

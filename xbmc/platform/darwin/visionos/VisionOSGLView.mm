@@ -54,9 +54,10 @@ constexpr CGFloat GAZE_DRAG_THRESHOLD = 12.0; // Apple-style movement allowance;
 // 0.5 is +/- 27 degrees from an axis.
 constexpr CGFloat GAZE_DIAGONAL_LIMIT = 0.5;
 
-// Distance from the left edge, in fixed-desktop points, within which a drag
-// resolving Right is treated as Back instead.
-constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
+// Distance from either edge, in fixed-desktop points, within which an inward
+// drag is remapped: from the left edge, a drag resolving Right is Back
+// (Escape); from the right edge, a drag resolving Left is Stop (x).
+constexpr CGFloat GAZE_EDGE_MARGIN = 192.0; // 10% of the 1920-pt desktop, each side
 } // namespace
 
 @interface VisionOSGLView ()
@@ -663,8 +664,15 @@ constexpr CGFloat GAZE_EDGE_MARGIN = 60.0;
                         : (dy > 0 ? XBMCK_DOWN : XBMCK_UP);
   if (k == XBMCK_RIGHT && self.gazeStart.x < GAZE_EDGE_MARGIN)
     k = XBMCK_ESCAPE;
+  else if (k == XBMCK_LEFT && self.gazeStart.x > VISIONOS_DESKTOP_WIDTH - GAZE_EDGE_MARGIN)
+    k = XBMCK_x;
   VISIONOS_SHELL_LOG(LOGDEBUG, "VisionOSGLView: gaze drag dx={:.1f} dy={:.1f} startx={:.1f} key={}", dx, dy, self.gazeStart.x, (int)k);
-  [g_xbmcController sendKey:k];
+  // Stop is the letter key x: Kodi derives ascii from the unicode field, so
+  // it must carry unicode; Escape and the arrows match on sym alone.
+  if (k == XBMCK_x)
+    [g_xbmcController sendKeyWithUnicode:k];
+  else
+    [g_xbmcController sendKey:k];
 }
 
 - (void)injectGazePhase:(NSInteger)phase x:(double)x y:(double)y

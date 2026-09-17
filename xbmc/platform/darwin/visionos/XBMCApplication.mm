@@ -23,20 +23,6 @@
 
 #pragma mark - Shutdown
 
-- (void)applicationWillResignActive:(UIApplication*)application
-{
-  // Interrupted by system UI (control centre, etc.)
-}
-
-- (void)applicationDidEnterBackground:(UIApplication*)application
-{
-  if (application.applicationState == UIApplicationStateBackground)
-  {
-    [self.xbmcController pauseAnimation];
-    [self.xbmcController enterBackground];
-  }
-}
-
 - (void)applicationWillTerminate:(UIApplication*)application
 {
   [self.xbmcController stopAnimation];
@@ -44,37 +30,10 @@
 
 #pragma mark - Startup
 
-- (void)applicationDidBecomeActive:(UIApplication*)application
-{
-}
-
-- (void)applicationWillEnterForeground:(UIApplication*)application
-{
-  [self.xbmcController resumeAnimation];
-  [self.xbmcController enterForeground];
-}
-
 - (BOOL)application:(UIApplication*)application
     didFinishLaunchingWithOptions:(NSDictionary*)launchOptions
 {
-  // UI setup
-  // visionOS: UIScreen is unavailable; window geometry is managed by the system.
-  self.window = [[UIWindow alloc] init];
-  self.window.rootViewController = [XBMCController new];
-  [self.window makeKeyAndVisible];
-  if (@available(visionOS 1.0, *))
-  {
-    UIWindowScene* ws = self.window.windowScene;
-    if (ws)
-    {
-      UIWindowSceneGeometryPreferencesVision* geo =
-          [[UIWindowSceneGeometryPreferencesVision alloc] init];
-      geo.size = CGSizeMake(VISIONOS_DESKTOP_WIDTH, VISIONOS_DESKTOP_HEIGHT);
-      geo.resizingRestrictions = UIWindowSceneResizingRestrictionsUniform;
-      [ws requestGeometryUpdateWithPreferences:geo errorHandler:nil];
-    }
-  }
-  [self.xbmcController startAnimation];
+  // Window creation lives in XBMCSceneDelegate (scene:willConnectToSession:).
 
   // Audio session
   auto audioSession = AVAudioSession.sharedInstance;
@@ -89,6 +48,75 @@
     NSLog(@"audioSession setActive failed: %@", err);
 
   return YES;
+}
+
+@end
+
+@implementation XBMCSceneDelegate
+{
+  BOOL m_inBackground;
+}
+
+- (XBMCController*)xbmcController
+{
+  return static_cast<XBMCController*>(self.window.rootViewController);
+}
+
+- (void)scene:(UIScene*)scene
+    willConnectToSession:(UISceneSession*)session
+                 options:(UISceneConnectionOptions*)connectionOptions
+{
+  if (![scene isKindOfClass:[UIWindowScene class]])
+    return;
+  UIWindowScene* ws = (UIWindowScene*)scene;
+
+  // UI setup
+  // visionOS: UIScreen is unavailable; window geometry is managed by the system.
+  self.window = [[UIWindow alloc] initWithWindowScene:ws];
+  self.window.rootViewController = [XBMCController new];
+  [self.window makeKeyAndVisible];
+
+  // Keep the application delegate's window pointing at the same window so
+  // applicationWillTerminate: can still reach the controller.
+  XBMCApplicationDelegate* appDelegate =
+      (XBMCApplicationDelegate*)UIApplication.sharedApplication.delegate;
+  appDelegate.window = self.window;
+
+  UIWindowSceneGeometryPreferencesVision* geo =
+      [[UIWindowSceneGeometryPreferencesVision alloc] init];
+  geo.size = CGSizeMake(VISIONOS_DESKTOP_WIDTH, VISIONOS_DESKTOP_HEIGHT);
+  geo.resizingRestrictions = UIWindowSceneResizingRestrictionsUniform;
+  [ws requestGeometryUpdateWithPreferences:geo errorHandler:nil];
+
+  m_inBackground = NO;
+  [self.xbmcController startAnimation];
+}
+
+- (void)sceneWillResignActive:(UIScene*)scene
+{
+  // Interrupted by system UI (control centre, etc.)
+}
+
+- (void)sceneDidEnterBackground:(UIScene*)scene
+{
+  m_inBackground = YES;
+  [self.xbmcController pauseAnimation];
+  [self.xbmcController enterBackground];
+}
+
+- (void)sceneWillEnterForeground:(UIScene*)scene
+{
+  // Also delivered once at first launch, right after willConnectToSession;
+  // only resume after a real background.
+  if (!m_inBackground)
+    return;
+  m_inBackground = NO;
+  [self.xbmcController resumeAnimation];
+  [self.xbmcController enterForeground];
+}
+
+- (void)sceneDidBecomeActive:(UIScene*)scene
+{
 }
 
 @end
