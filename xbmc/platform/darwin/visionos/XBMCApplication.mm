@@ -47,6 +47,12 @@
   if (![audioSession setActive:YES error:&err])
     NSLog(@"audioSession setActive failed: %@", err);
 
+  // Declare multichannel content up front; the VISIONOS sink re-asserts it
+  // per stream.  Route details are logged to kodi.log by WinSystemVisionOS.
+  err = nil;
+  if (![audioSession setSupportsMultichannelContent:YES error:&err])
+    NSLog(@"audioSession setSupportsMultichannelContent failed: %@", err);
+
   return YES;
 }
 

@@ -14,6 +14,7 @@
 // AVAudioSession is present on visionOS, but tvOS-specific route / category
 // constants that aren't available on xrOS will produce warnings.
 #import "cores/AudioEngine/Sinks/AESinkDARWINIOS.h"
+#import "cores/AudioEngine/Sinks/AESinkVisionOS.h"
 #include "cores/RetroPlayer/process/ios/RPProcessInfoIOS.h"
 #include "cores/RetroPlayer/rendering/VideoRenderers/RPRendererOpenGLES.h"
 #include "cores/VideoPlayer/DVDCodecs/DVDFactoryCodec.h"
@@ -60,6 +61,7 @@
 #include <mutex>
 #include <vector>
 
+#import <AVFoundation/AVAudioSession.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/CADisplayLink.h>
 
@@ -146,6 +148,9 @@ CWinSystemVisionOS::CWinSystemVisionOS() : CWinSystemBase(), m_lostDeviceTimer(t
 
   m_winEvents = std::make_unique<CWinEventsVisionOS>();
 
+  // VISIONOS first so it is the default device; DARWINIOS stays selectable
+  // (Settings > System > Audio > Audio output device) as the stereo fallback.
+  CAESinkVisionOS::Register();
   CAESinkDARWINIOS::Register();
 }
 
@@ -155,8 +160,29 @@ CWinSystemVisionOS::~CWinSystemVisionOS()
   delete m_pDisplayLink;
 }
 
+// AUDIO PROBE (kodi.log copy): what the current audio route offers.
+static void LogAudioRoute(const char* why)
+{
+  AVAudioSession* s = AVAudioSession.sharedInstance;
+  AVAudioSessionPortDescription* out = s.currentRoute.outputs.firstObject;
+  CLog::Log(LOGINFO,
+            "AUDIOPROBE [{}] port={} name={} spatialEnabled={} supportsMultichannel={} "
+            "maxOutCh={} outCh={} sampleRate={:.0f} ioBuf={:.4f} outLatency={:.4f}",
+            why, out ? [out.portType UTF8String] : "none",
+            out ? [out.portName UTF8String] : "none", out ? (int)out.isSpatialAudioEnabled : -1,
+            (int)s.supportsMultichannelContent, (long)s.maximumOutputNumberOfChannels,
+            (long)s.outputNumberOfChannels, s.sampleRate, s.IOBufferDuration, s.outputLatency);
+}
+
 bool CWinSystemVisionOS::InitWindowSystem()
 {
+  LogAudioRoute("init");
+  [NSNotificationCenter.defaultCenter addObserverForName:AVAudioSessionRouteChangeNotification
+                                                  object:nil
+                                                   queue:nil
+                                              usingBlock:^(NSNotification* note) {
+                                                LogAudioRoute("routechange");
+                                              }];
   return CWinSystemBase::InitWindowSystem();
 }
 

@@ -148,6 +148,11 @@ if(CORE_SYSTEM_NAME STREQUAL darwin_embedded OR CORE_SYSTEM_NAME STREQUAL vision
     list(APPEND SOURCES Sinks/AESinkDARWINTVOS.mm)
     list(APPEND HEADERS Sinks/AESinkDARWINTVOS.h)
   endif()
+  if("visionos" IN_LIST CORE_PLATFORM_NAME_LC)
+    # AVSampleBufferAudioRenderer sink: multichannel into the OS spatializer.
+    list(APPEND SOURCES Sinks/AESinkVisionOS.mm)
+    list(APPEND HEADERS Sinks/AESinkVisionOS.h)
+  endif()
 endif()
 
 if(CORE_SYSTEM_NAME STREQUAL android)
